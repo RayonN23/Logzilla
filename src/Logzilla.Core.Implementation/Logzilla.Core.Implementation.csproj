@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Concrete engine. Every type is internal; hosts go through CoreServices. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Logzilla.Core.Implementation</RootNamespace>
+    <AssemblyName>Logzilla.Core.Implementation</AssemblyName>
+    <Description>Log parsing, indexing and query engine for Logzilla.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Logzilla.Core\Logzilla.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Tests exercise the parsers directly; this is the standard mechanism for that. -->
+    <InternalsVisibleTo Include="Logzilla.Core.Implementation.Tests" />
+  </ItemGroup>
+
+</Project>

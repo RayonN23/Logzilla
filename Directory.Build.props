@@ -1,0 +1,37 @@
+<Project>
+
+  <!-- Win32 version-resource fields, so Windows can say what is installed and by
+       whom: Product -> ProductName, Company -> CompanyName, Copyright ->
+       LegalCopyright, Trademark -> LegalTrademarks, Version -> File/ProductVersion.
+       FileDescription comes from each project's AssemblyTitle. -->
+  <PropertyGroup>
+    <Product>Logzilla Log Viewer</Product>
+    <Company>Rayon Narain (Independent)</Company>
+    <Authors>Rayon Narain (Independent)</Authors>
+    <Copyright>© 2026 Rayon Narain. All rights reserved.</Copyright>
+    <Trademark>Logzilla Log Analyzer</Trademark>
+    <Version>2.1.0</Version>
+    <NeutralLanguage>en</NeutralLanguage>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <!-- Required for IDE0005 (unused usings) to be reported on build.
+         CS1591 is suppressed with it: XML docs are optional in this codebase,
+         so demanding a comment on every public member would be noise. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest-Recommended</AnalysisLevel>
+    <!-- NU1900 only fires when the vulnerability feed is unreachable, which says
+         nothing about this code and would break offline builds. -->
+    <NoWarn>NU1900;CS1591</NoWarn>
+  </PropertyGroup>
+
+</Project>

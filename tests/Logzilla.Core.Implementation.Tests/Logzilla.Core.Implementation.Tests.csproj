@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <RootNamespace>Logzilla.Core.Implementation.Tests</RootNamespace>
+    <AssemblyName>Logzilla.Core.Implementation.Tests</AssemblyName>
+    <!-- Test method names read as sentences, which CA1707 would otherwise reject. -->
+    <NoWarn>$(NoWarn);CA1707</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="NUnit" Version="4.2.2" />
+    <PackageReference Include="NUnit3TestAdapter" Version="4.6.0" />
+    <PackageReference Include="NUnit.Analyzers" Version="4.3.0">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Logzilla.Core\Logzilla.Core.csproj" />
+    <ProjectReference Include="..\..\src\Logzilla.Core.Implementation\Logzilla.Core.Implementation.csproj" />
+    <ProjectReference Include="..\..\src\Logzilla.Setup\Logzilla.Setup.csproj" />
+  </ItemGroup>
+
+</Project>

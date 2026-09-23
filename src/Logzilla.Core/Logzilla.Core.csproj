@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The analysis engine: parsing, indexing, querying and merging.
+       Deliberately has no reference to System.Windows.Forms or System.Drawing,
+       which is what keeps it unit-testable without a UI. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Logzilla.Core</RootNamespace>
+    <AssemblyName>Logzilla.Core</AssemblyName>
+    <Description>Log parsing, indexing and query engine for Logzilla.</Description>
+  </PropertyGroup>
+
+</Project>

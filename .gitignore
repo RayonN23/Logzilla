@@ -1,0 +1,28 @@
+# Build output
+bin/
+obj/
+artifacts/
+dist/
+*.user
+*.suo
+*.userprefs
+
+# Visual Studio / Rider / VS Code
+.vs/
+.idea/
+.vscode/
+*.sln.docstates
+
+# Test output
+TestResults/
+*.trx
+*.coverage
+
+# OS noise
+Thumbs.db
+.DS_Store
+
+# Local scratch
+*.log
+!samples/*.log
+/claude

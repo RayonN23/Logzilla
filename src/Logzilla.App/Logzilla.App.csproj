@@ -1,0 +1,51 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The Windows Forms front end. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>Logzilla.App</RootNamespace>
+    <AssemblyName>Logzilla</AssemblyName>
+    <ApplicationIcon>..\..\assets\Logzilla.ico</ApplicationIcon>
+    <!-- AssemblyTitle is what Windows shows as the file's Description in Properties,
+         in Task Manager, and in the SmartScreen prompt. Description becomes the
+         Comments field. -->
+    <AssemblyTitle>Logzilla Log Viewer</AssemblyTitle>
+    <Description>A log analyzer for very large files.</Description>
+  </PropertyGroup>
+
+  <!-- Startup: precompile the app's own assemblies at publish so a launch does not
+       JIT the whole UI construction before the window can appear. The framework is
+       already precompiled. Needs a runtime identifier, which build.ps1 supplies. -->
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' != ''">
+    <PublishReadyToRun>true</PublishReadyToRun>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Logzilla.Core\Logzilla.Core.csproj" />
+    <!-- The host is the one place an implementation may be referenced: it exists
+         solely to compose the concrete services in Program.Main. -->
+    <ProjectReference Include="..\Logzilla.Core.Implementation\Logzilla.Core.Implementation.csproj" />
+  </ItemGroup>
+
+  <!-- Reference-only material for the UI redesign: a static mockup and a template
+       Theme.cs, not live source. Excluded so it is never compiled into the app. -->
+  <ItemGroup>
+    <Compile Remove="Redesign Brief\**" />
+    <Compile Remove="Redesign Brief\**\*.cs" />
+    <None Remove="Redesign Brief\**" />
+    <None Include="Redesign Brief\**" />
+  </ItemGroup>
+
+  <!-- Embedded so the window icon does not depend on the .exe staying put. -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\assets\Logzilla.ico" LogicalName="appicon" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Tests exercise the owner-drawn controls' internal layout/state logic directly. -->
+    <InternalsVisibleTo Include="Logzilla.App.Tests" />
+  </ItemGroup>
+
+</Project>

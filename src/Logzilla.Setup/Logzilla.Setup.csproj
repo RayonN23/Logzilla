@@ -1,0 +1,56 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The installer.
+
+    Built by the same .NET SDK as everything else, so there is no Inno Setup, no
+    WiX and nothing else to install before you can produce a setup.exe.
+
+    It targets plain net10.0 rather than net10.0-windows because it needs no UI
+    framework, which also means it compiles on a non-Windows machine. Everything
+    that genuinely requires Windows is marked [SupportedOSPlatform("windows")].
+
+    The published application is embedded as a single zip resource by the
+    PackPayload target below, so the output is one self-contained .exe.
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Logzilla.Setup</RootNamespace>
+    <AssemblyName>Logzilla-Setup</AssemblyName>
+    <!-- Names the file as the installer rather than the app, since this is the
+         description Windows shows in the elevation/SmartScreen prompt. -->
+    <AssemblyTitle>Logzilla Log Viewer installer</AssemblyTitle>
+    <Description>Installer for Logzilla Log Viewer.</Description>
+    <ApplicationIcon>..\..\assets\Logzilla.ico</ApplicationIcon>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <!-- Runtime identifier and single-file packaging are supplied at publish time
+         by build.ps1, so the project itself stays buildable on any machine. -->
+  </PropertyGroup>
+
+  <!--
+    Zip whatever is in artifacts\publish and embed it. Building the installer
+    without publishing the app first produces an installer with no payload,
+    which the program detects and reports rather than installing nothing.
+  -->
+  <Target Name="PackPayload" BeforeTargets="PrepareForBuild">
+    <PropertyGroup>
+      <PayloadSource>$(MSBuildThisFileDirectory)..\..\artifacts\publish</PayloadSource>
+      <PayloadZip>$(MSBuildThisFileDirectory)obj\payload.zip</PayloadZip>
+    </PropertyGroup>
+    <MakeDir Directories="$(MSBuildThisFileDirectory)obj" />
+    <ZipDirectory SourceDirectory="$(PayloadSource)"
+                  DestinationFile="$(PayloadZip)"
+                  Overwrite="true"
+                  Condition="Exists('$(PayloadSource)')" />
+    <Touch Files="$(PayloadZip)" AlwaysCreate="true" Condition="!Exists('$(PayloadZip)')" />
+  </Target>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Logzilla.Core.Implementation.Tests" />
+    <EmbeddedResource Include="obj\payload.zip" LogicalName="payload" Visible="false" />
+  </ItemGroup>
+
+</Project>
