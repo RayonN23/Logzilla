@@ -89,6 +89,12 @@ internal sealed partial class LogView : Control
     /// visible.</summary>
     public bool ShowTime = true;
 
+    /// <summary>The clock the time column reads in. A file whose zone nobody knows
+    /// shows its stamps as written whatever this says, dimmed so it does not pass for
+    /// a converted time.</summary>
+    public TimeMode TimeMode = TimeMode.AsWritten;
+    public TimeZoneInfo LocalZone = TimeZoneInfo.Local;
+
     public event EventHandler SelectionChanged;
     public event EventHandler<WordPickedEventArgs> WordPicked;
     public event EventHandler CopyEntryRequested;
@@ -103,6 +109,8 @@ internal sealed partial class LogView : Control
     private int _maxMsgChars;
     private ILineReader _feed;
     private float _cw = 8f;
+    private float _digitW = 7f;   // one MonoSmall digit, for sizing the line-number gutter
+    private int _gutterW = Dpi.S(ColGutter);
     private int _rowH = 20;
     private int _textTop;       // baseline offset so mono text centers in _rowH
     private int _hotLine = -1;
@@ -199,6 +207,8 @@ internal sealed partial class LogView : Control
             _textTop = Math.Max(0, (_rowH - Font.Height) / 2);
             _timeFullW = TextRenderer.MeasureText(g, "0000-00-00 00:00:00.000", Theme.MonoSmall,
                 new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding).Width;
+            _digitW = TextRenderer.MeasureText(g, new string('0', 10), Theme.MonoSmall,
+                new Size(int.MaxValue, int.MaxValue), TextFormatFlags.NoPadding).Width / 10f;
         }
         Regutter();
     }
@@ -239,6 +249,11 @@ internal sealed partial class LogView : Control
 
     private void Regutter()
     {
+        // The fixed gutter holds six digits; past 999,999 lines it widens, or the
+        // right-aligned number is clipped on the left and 1,000,000 reads as 000000.
+        var digits = _file == null ? 1 : Math.Max(1, _file.N).ToString(CultureInfo.InvariantCulture).Length;
+        _gutterW = Math.Max(Dpi.S(ColGutter), (int)Math.Ceiling(digits * _digitW) + Dpi.S(14));
+
         _srcColW = 0;
         if (_file != null && _file.Merged && ShowSource)
         {
@@ -247,9 +262,9 @@ internal sealed partial class LogView : Control
         }
     }
 
-    private static int GutterX => Dpi.S(ColGutter);
-    private static int SpineX => GutterX;
-    private static int TimeX => SpineX + Dpi.S(ColSpine);
+    private int GutterX => _gutterW;
+    private int SpineX => GutterX;
+    private int TimeX => SpineX + Dpi.S(ColSpine);
     private int LevelX => TimeX + TimeColW;
     private int SrcX => LevelX + Dpi.S(ColLevel);
     private int MessageX => SrcX + _srcColW;
@@ -973,6 +988,13 @@ internal sealed partial class LogView : Control
     /// date instead.</summary>
     private static string TimeText(double ms) => DisplayFormatter.Time(ms);
 
+    /// <summary>Line <paramref name="i"/>'s stored time in the clock the column reads in.</summary>
+    private double ShownTime(int i) => TimeZones.Display(_file.Ts[i], _file.SrcOf(i), TimeMode, LocalZone);
+
+    /// <summary>False only when a conversion was asked for and this line's file could not
+    /// give one, because nobody knows what zone its stamps are in.</summary>
+    private bool Converted(int i) => TimeMode == TimeMode.AsWritten || TimeZones.IsKnown(_file.SrcOf(i));
+
     /// <summary>Builds the visible-page layout: date bands where the day changes,
     /// and the selected row taller than the rest to hold its expansion.</summary>
     private List<RowSlot> BuildSlots()
@@ -988,11 +1010,11 @@ internal sealed partial class LogView : Control
         for (var p = _v.Value; p < Res.View.Count && y < vh; p++)
         {
             var i = Res.View[p];
-            var dk = DateKeyOf(_file.Ts[i]);
+            var dk = DateKeyOf(ShownTime(i));
             if (!ShowTime && dk != null && lastDate != null && dk != lastDate)
             {
                 var bandH = Dpi.S(Theme.DateBandHeight);
-                slots.Add(new RowSlot(-1, y, bandH, DateBandLabel(_file.Ts[i])));
+                slots.Add(new RowSlot(-1, y, bandH, DateBandLabel(ShownTime(i))));
                 y += bandH;
             }
             if (dk != null)
@@ -1126,11 +1148,11 @@ internal sealed partial class LogView : Control
             new Rectangle(0, y, GutterX - Dpi.S(10), _rowH), marked ? Theme.Accent : Theme.TextDim,
             Theme.TextFlagsRight);
 
-        var ts = _file.Ts[i];
+        var ts = ShownTime(i);
         if (ShowTime && !double.IsNaN(ts))
         {
             TextRenderer.DrawText(g, TimeText(ts), Theme.MonoSmall, new Point(TimeX + TimeTextPad, y + TopFor(Theme.MonoSmall)),
-                neutral ? Theme.Text3 : Theme.TextBright, Theme.TextFlagsPoint);
+                neutral || !Converted(i) ? Theme.Text3 : Theme.TextBright, Theme.TextFlagsPoint);
         }
 
         if (sev > 0)
@@ -1275,10 +1297,10 @@ internal sealed partial class LogView : Control
 
         TextRenderer.DrawText(g, (i + 1).ToString(CultureInfo.InvariantCulture), Theme.MonoSmall,
             new Rectangle(0, y, GutterX - Dpi.S(10), _rowH), Theme.Accent, Theme.TextFlagsRight);
-        var ts = _file.Ts[i];
+        var ts = ShownTime(i);
         if (ShowTime && !double.IsNaN(ts))
         {
-            TextRenderer.DrawText(g, TimeText(ts), Theme.MonoSmall, new Point(TimeX + TimeTextPad, y + TopFor(Theme.MonoSmall)), Theme.TextBright, Theme.TextFlagsPoint);
+            TextRenderer.DrawText(g, TimeText(ts), Theme.MonoSmall, new Point(TimeX + TimeTextPad, y + TopFor(Theme.MonoSmall)), Converted(i) ? Theme.TextBright : Theme.Text3, Theme.TextFlagsPoint);
         }
         if (sev > 0)
         {

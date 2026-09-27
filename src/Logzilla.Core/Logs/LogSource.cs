@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using System.Text;
 using Logzilla.Core.Formats;
 
@@ -23,6 +25,22 @@ public sealed class LogSource
 
     /// <summary>True when the file holds one JSON object per line.</summary>
     public bool IsJson { get; set; }
+
+    /// <summary>
+    /// True when the stamps carry their own UTC offset (<c>Z</c>, <c>+02:00</c>, CLF's
+    /// <c>+0000</c>). The document's times for this file are then real instants, and
+    /// <see cref="Offsets"/> says what each was written as.
+    /// </summary>
+    public bool Zoned { get; set; }
+
+    /// <summary>The offsets the stamps were written with, in order. Filled while indexing.</summary>
+    public List<ZoneOffset> Offsets { get; } = new List<ZoneOffset>();
+
+    /// <summary>
+    /// For stamps with no zone of their own: the zone the user says they were written
+    /// in. Null means nobody knows, and the document holds the times as written.
+    /// </summary>
+    public TimeZoneInfo Declared { get; set; }
 
     /// <summary>Assigned by the indexer once the format has been detected.</summary>
     public ITimestampParser Parser { get; set; }

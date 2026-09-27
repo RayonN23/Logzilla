@@ -812,6 +812,13 @@ internal sealed partial class MainForm
             "  Drag across the timeline, or type in the TIME box (e.g. 20:00 - 21:00,\r\n" +
             "  8pm - 9pm, 8:30am - 5:30pm, 2026-01-15 08:00 - 09:30) to set a range.\r\n" +
             "  Right-click a severity button to isolate that level.\r\n\r\n" +
+            "TIME ZONES\r\n" +
+            "  The Log time / Local time / UTC chip (View > Show times) picks the\r\n" +
+            "  clock times are shown in. Log time is exactly what the file wrote.\r\n" +
+            "  Stamps ending in Z or an offset (+02:00, or +0000 in web server logs)\r\n" +
+            "  convert on their own. For stamps with no zone you are asked once which\r\n" +
+            "  zone they are in; until then they stay in log time, dimmed.\r\n" +
+            "  View > Time zone of this file, or the Sources tab, changes it.\r\n\r\n" +
             "MERGING\r\n" +
             "  Open two or more logs, then Ctrl+M. Lines are interleaved by timestamp\r\n" +
             "  into one timeline and a colour-coded source column appears. Stack traces\r\n" +

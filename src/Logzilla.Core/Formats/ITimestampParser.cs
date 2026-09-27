@@ -11,6 +11,13 @@ public interface ITimestampParser
     /// <summary>Index just past the timestamp that was last matched.</summary>
     int LastEnd { get; set; }
 
+    /// <summary>
+    /// The UTC offset in minutes the last matched stamp carried (<c>Z</c> is 0), or
+    /// null when it carried none. The milliseconds returned are always the wall clock
+    /// as written; applying the offset is the caller's decision.
+    /// </summary>
+    int? LastOffset { get; }
+
     /// <summary>Syslog carries no year, so one is supplied from the file's own timestamp.</summary>
     int Year { get; set; }
 

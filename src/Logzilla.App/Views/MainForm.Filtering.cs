@@ -118,7 +118,8 @@ internal sealed partial class MainForm
         }
         if (TimeRangeParser.TryParseRange(txt, GetBaseDay(), out var pt0, out var pt1))
         {
-            _t0 = pt0; _t1 = pt1;
+            // Typed in the clock the times are shown in; stored the way the lines are.
+            _t0 = StoredTime(pt0); _t1 = StoredTime(pt1);
             if (_tRange != null)
             {
                 _tRange.ForeColor = Theme.Text;
@@ -159,7 +160,7 @@ internal sealed partial class MainForm
             return 0;
         }
         const long dayMs = 86400000L;
-        return (long)Math.Floor(lo / dayMs) * dayMs;
+        return (long)Math.Floor(ShownTime(lo) / dayMs) * dayMs;
     }
 
     private void UpdateStatus()

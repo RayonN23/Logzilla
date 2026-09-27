@@ -72,9 +72,18 @@ Severity is read from the line and shown in its own colour-coded column. UTF-8,
 ANSI and UTF-16 (both byte orders) are handled, with byte order marks detected
 automatically.
 
+**Shows times in local time or UTC.** The **Log time / Local time / UTC** chip
+picks the clock every time on screen is read in; log time is exactly what the file
+wrote. Stamps that carry a zone (`Z`, `+02:00`, CLF's `+0000`, CLEF's `@t`)
+convert on their own, daylight saving included. Stamps
+with no zone are never guessed. You are asked once whether they are local time, UTC
+or another offset, and the answer is remembered per file. The file's last-modified
+time is offered as a hint when it points one way.
+
 **Merges by time.** Open several logs and press **Merge** in the command bar, or
 <kbd>Ctrl</kbd>+<kbd>M</kbd>. Entries interleave onto one timeline with a
-colour-coded source column, even when the files use different formats. Stack
+colour-coded source column, even when the files use different formats or time
+zones: files whose zone is known are ordered by the moment each line happened. Stack
 traces stay attached to the entry above them, and each source can be hidden or
 shown from the Sources panel without redoing the merge. This is what turns "the
 gateway logged a timeout" and "the service logged a connection reset" into one
@@ -155,6 +164,9 @@ currently shown. <kbd>Ctrl</kbd>+<kbd>1</kbd>..<kbd>7</kbd> switch between them.
   views get their own tab.
 - **Long lines** — a horizontal scrollbar (and Shift+wheel) reaches anything past
   the right edge, or the **Wrap** chip folds long messages onto several lines.
+- **Log time / Local time / UTC** chip — the clock times are shown in; click to cycle,
+  right-click to choose. View › Time zone of this file sets the zone of stamps that
+  carry none.
 - **Date** chip — collapses the date-and-time column and gives its width to the
   message; a once-a-day band keeps the date visible.
 
@@ -211,8 +223,10 @@ to add it to the Find box.
 - JSON support assumes one object per line; pretty-printed JSON is read as text.
 - Merging is capped at 12 files.
 - Follow works on a single file, not on a merged view.
-- Timestamps display exactly as written, with no timezone conversion. Syslog and
-  time-only formats carry no year, so the file's last-modified date is used.
+- A file whose stamps carry no zone is shown in log time until you say which zone it
+  is in; there is no reliable way to tell from the file alone.
+- Syslog and time-only formats carry no year, so the file's last-modified date is
+  used.
 
 ## Building from source
 

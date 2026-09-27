@@ -75,6 +75,7 @@ internal sealed partial class MainForm : Form
             l.Add(Kv("Size", DisplayFormatter.Bytes(s0.Size)));
             l.Add(Kv("Encoding", s0.Encoding.WebName.ToUpperInvariant()));
             l.Add(Kv("Timestamps", s0.Kind == TsKind.None ? "none found" : s0.Kind.ToString().ToLowerInvariant()));
+            AddZoneRow(l, s0, 0);
             l.Add(Kv("Entries", DisplayFormatter.Number(f.N)));
             l.Add(Head("FOLDER"));
             var fo = new PanelRow(Path.GetDirectoryName(s0.Path), "");
@@ -113,6 +114,11 @@ internal sealed partial class MainForm : Form
             it.Accent = Palette.Pick(f.Srcs[i].TintIndex); it.Indent = 1; it.Tag = "folder:" + i;
             l.Add(it);
         }
+        l.Add(Head("TIME ZONES  (click to set one the stamps don't give)"));
+        for (var i = 0; i < f.Srcs.Count; i++)
+        {
+            AddZoneRow(l, f.Srcs[i], i);
+        }
         return l;
     }
 
@@ -126,8 +132,8 @@ internal sealed partial class MainForm : Form
         l.Add(Kv("Entries indexed", DisplayFormatter.Number(f.N)));
         l.Add(Kv(f.Merged ? "Files" : "File size", f.Merged ? f.Srcs.Count.ToString(CultureInfo.InvariantCulture) : DisplayFormatter.Bytes(f.Size)));
         l.Add(Kv("Time span", span > 0 ? DisplayFormatter.Duration(span) : "-"));
-        l.Add(Kv("First", DisplayFormatter.Time(_res.Lo)));
-        l.Add(Kv("Last", DisplayFormatter.Time(_res.Hi)));
+        l.Add(Kv("First", DisplayFormatter.Time(ShownTime(_res.Lo))));
+        l.Add(Kv("Last", DisplayFormatter.Time(ShownTime(_res.Hi))));
         l.Add(Kv("Average rate", span > 0 ? (_res.View.Count / (span / 60000.0)).ToString("0.0", CultureInfo.InvariantCulture) : "-", span > 0 ? "/min" : ""));
         l.Add(Kv("Errors or worse", DisplayFormatter.Number(errs),
             _res.View.Count > 0 ? (errs * 100.0 / _res.View.Count).ToString("0.00", CultureInfo.InvariantCulture) + "%" : ""));
@@ -181,7 +187,7 @@ internal sealed partial class MainForm : Form
         for (var k = 0; k < Math.Min(5, idx.Count); k++)
         {
             var t = _res.Lo + (double)idx[k] / FilterResult.Buckets * span;
-            var it = new PanelRow(DisplayFormatter.Time(t), DisplayFormatter.Number(_res.BucketErr[idx[k]]));
+            var it = new PanelRow(DisplayFormatter.Time(ShownTime(t)), DisplayFormatter.Number(_res.BucketErr[idx[k]]));
             it.Accent = Theme.SevColor[5];
             it.Chevron = true;
             it.Bar = (float)_res.BucketErr[idx[k]] / Math.Max(1, top);
@@ -553,7 +559,7 @@ internal sealed partial class MainForm : Form
                 {
                     t = t.Substring(0, 120);
                 }
-                var timeStr = DisplayFormatter.Time(f.Ts[i]);
+                var timeStr = ShowLineTime(f, i);
                 var right = "#" + DisplayFormatter.Number(i + 1) + (timeStr.Length > 0 ? "  " + timeStr : "");
                 var it = new PanelRow(t, right);
                 it.Accent = f.Sev[i] > 0 ? Theme.SevColor[f.Sev[i]] : Theme.SevColor[4];
@@ -606,7 +612,9 @@ internal sealed partial class MainForm : Form
         }
         var sb = new StringBuilder();
         sb.AppendLine("line      " + DisplayFormatter.Number(i + 1));
-        sb.AppendLine("time      " + (DisplayFormatter.Time(f.Ts[i]).Length > 0 ? DisplayFormatter.Time(f.Ts[i]) : "none"));
+        var shown = ShowLineTime(f, i);
+        sb.AppendLine("time      " + (shown.Length > 0 ? shown : "none"));
+        sb.AppendLine("zone      " + TimeZones.Describe(f.SrcOf(i), _localZone) + ZoneShownNote(f.SrcOf(i)));
         sb.AppendLine("severity  " + (f.Sev[i] > 0 ? Levels.Name[f.Sev[i]] : "unclassified"));
         if (f.Merged)
         {
@@ -681,6 +689,14 @@ internal sealed partial class MainForm : Form
             StartFilter();
         }
         else if (tag == "srcall") { _srcMask = -1; StartFilter(); }
+        else if (tag.StartsWith("zone:", StringComparison.Ordinal))
+        {
+            var si = int.Parse(tag.AsSpan(5), NumberStyles.Integer, CultureInfo.InvariantCulture);
+            if (f != null && si < f.Srcs.Count)
+            {
+                AskZone(f.Srcs[si]);
+            }
+        }
         else if (tag == "merge")
         {
             DoMerge();
