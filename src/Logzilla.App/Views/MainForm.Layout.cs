@@ -204,6 +204,9 @@ internal sealed partial class MainForm
         view.DropDownItems.Add(_miMulti);
         view.DropDownItems.Add(_miSrcCol);
         view.DropDownItems.Add(new ToolStripSeparator());
+        view.DropDownItems.Add(BuildTimeMenu());
+        view.DropDownItems.Add(Mi("Time zone of this file...", Keys.None, delegate { ZoneOfCurrentFile(); }));
+        view.DropDownItems.Add(new ToolStripSeparator());
         view.DropDownItems.Add(Mi("Larger text", Keys.Control | Keys.Oemplus, delegate { Zoom(1); }));
         view.DropDownItems.Add(Mi("Smaller text", Keys.Control | Keys.OemMinus, delegate { Zoom(-1); }));
         view.DropDownItems.Add(Mi("Reset text size", Keys.Control | Keys.D0, delegate { Zoom(0); }));
@@ -317,6 +320,10 @@ internal sealed partial class MainForm
         _bWrap.Click2 += delegate { _view.Wrap = !_view.Wrap; _bWrap.On = _view.Wrap; _bWrap.Invalidate(); _view.Invalidate(); };
         cmdRight.Controls.Add(_bWrap);
 
+        _bTime = BuildTimeChip();
+        _bTime.Margin = new Padding(0, 0, Dpi.S(Gap), 0);
+        cmdRight.Controls.Add(_bTime);
+
         _bDate = new ToggleChip { Label = "Date", BackColor = Theme.BgChrome };
         _bDate.Height = Dpi.S(Theme.ControlHeight);
         _bDate.Fit(60);
@@ -396,7 +403,7 @@ internal sealed partial class MainForm
         {
             _t0 = a.A; _t1 = a.B; _tl.T0 = a.A; _tl.T1 = a.B;
             _updatingTimeRange = true;
-            _tRange.Text = double.IsNaN(a.A) ? "" : TimeRangeParser.FormatTimeRange(a.A, a.B);
+            _tRange.Text = double.IsNaN(a.A) ? "" : FormatShownRange(a.A, a.B);
             _tRange.ForeColor = Theme.Text;
             _bTRangeClear.ForeColor = double.IsNaN(a.A) ? Theme.TextDim : Theme.SevColor[4];
             _updatingTimeRange = false;
@@ -912,6 +919,8 @@ internal sealed partial class MainForm
         _view.ShowSource = _cfg.GetBool("srccol", true);
         _miSrcCol.Checked = _view.ShowSource;
         SyncLevels();
+        _timeMode = (TimeMode)Math.Clamp(_cfg.GetInt("timemode", 0), 0, 2);
+        SyncTimeMode();
         var sd = _cfg.GetInt("split", 0);
         Shown += delegate
         {
@@ -955,6 +964,7 @@ internal sealed partial class MainForm
             _cfg.Set("font", (int)Math.Round(_fontSize * 10));
             _cfg.Set("levels", _levelMask);
             _cfg.Set("srccol", _view.ShowSource);
+            _cfg.Set("timemode", (int)_timeMode);
             _cfg.Set("split", _split.SplitterDistance);
             var sb = new StringBuilder();
             for (var i = 0; i < _rules.Count; i++)

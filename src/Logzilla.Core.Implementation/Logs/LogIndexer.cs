@@ -63,6 +63,7 @@ internal sealed class LogIndexer : ILogIndexer
             Year = stamp.Year,
             BaseDayMs = CivilDate.DaysSinceEpoch(stamp.Year, stamp.Month, stamp.Day) * MillisecondsPerDay,
         };
+        source.Zoned = DetectZoned(source, sample);
         source.IndexedTo = source.DataStart;
         return source;
     }
@@ -111,6 +112,93 @@ internal sealed class LogIndexer : ILogIndexer
         return total > 0 && braces >= total * 0.8 && timed >= braces * 0.5;
     }
 
+    /// <summary>
+    /// True when most stamps in the sample carry a zone. Read with a parser of its own:
+    /// a time-only parser counts midnight rollovers, and the sample must not leave the
+    /// real one a day ahead.
+    /// </summary>
+    private bool DetectZoned(LogSource source, List<byte[]> sample)
+    {
+        if (source.Kind == TsKind.None)
+        {
+            return false;
+        }
+        var probe = new TsParser(_clock) { Kind = source.Kind, IsJson = source.IsJson };
+        int parsed = 0, zoned = 0;
+        foreach (var line in sample)
+        {
+            var p = 0;
+            if (source.IsJson)
+            {
+                p = -1;
+                for (var k = 0; k < JsonLog.TimeKeys.Length && p < 0; k++)
+                {
+                    p = JsonLog.Find(line, 0, line.Length, JsonLog.TimeKeys[k]);
+                }
+                if (p < 0)
+                {
+                    continue;
+                }
+            }
+            if (!probe.Parse(line, p, line.Length - p, out var ms) || double.IsNaN(ms))
+            {
+                continue;
+            }
+            parsed++;
+            if (probe.LastOffset.HasValue)
+            {
+                zoned++;
+            }
+        }
+        return parsed > 0 && zoned * 2 >= parsed;
+    }
+
+    /// <summary>
+    /// Turns each stamp into what the document stores for its file: the instant, when
+    /// the stamps carry a zone or the user has declared one; the wall clock otherwise.
+    /// </summary>
+    private sealed class StampZone
+    {
+        private readonly LogSource _source;
+        private readonly ZoneClock _declared;
+        private int _current;
+
+        public StampZone(LogSource source)
+        {
+            _source = source;
+            if (source.Offsets.Count > 0)
+            {
+                _current = source.Offsets[^1].Minutes;
+            }
+            if (!source.Zoned && source.Declared != null)
+            {
+                _declared = new ZoneClock(source.Declared);
+            }
+        }
+
+        public double Store(double wall, int? offset)
+        {
+            if (double.IsNaN(wall))
+            {
+                return wall;
+            }
+            if (!_source.Zoned)
+            {
+                return _declared == null ? wall : _declared.ToInstant(wall);
+            }
+            // A stamp that drops its zone in a file whose stamps carry one keeps the last.
+            var minutes = offset ?? _current;
+            var instant = wall - minutes * 60000.0;
+            var list = _source.Offsets;
+            if (list.Count == 0 || list[^1].Minutes != minutes)
+            {
+                list.Add(new ZoneOffset(instant, minutes));
+            }
+            _current = minutes;
+            return instant;
+        }
+    }
+
     private const int EncodingProbeBytes = 1 << 16;
     private const int ReadBufferBytes = 1 << 23;
     private const int FileStreamBufferBytes = 1 << 16;
@@ -150,6 +238,7 @@ internal sealed class LogIndexer : ILogIndexer
 
         var f = doc.Srcs[si];
         var ts = f.Parser ?? throw new InvalidOperationException("Source has not been prepared.");
+        var zone = new StampZone(f);
         var headCap = f.IsJson ? 8192 : 128;   // CLEF puts "@l" after the template
         var head = new byte[headCap];
         var flat = new byte[headCap];
@@ -218,12 +307,12 @@ internal sealed class LogIndexer : ILogIndexer
                             var c1 = q >= 2 ? buf[q - 1] : prev1;
                             cr = bigEndian ? c0 == 0 && c1 == 13 : c0 == 13 && c1 == 0;
                         }
-                        Emit(doc, si, ts, lineStart, lineEnd, head, headLen, flat, stride, bigEndian ? 1 : 0, cr);
+                        Emit(doc, si, ts, zone, lineStart, lineEnd, head, headLen, flat, stride, bigEndian ? 1 : 0, cr);
                         lineStart = lineEnd + stride;
                         headLen = 0;
                         p = q + stride;
                     }
-                    else 
+                    else
                     {
                         p = n;
                     }
@@ -231,7 +320,7 @@ internal sealed class LogIndexer : ILogIndexer
                 prev1 = buf[n - 1];
                 prev2 = n >= 2 ? buf[n - 2] : prev1;
                 gbase += n;
-                if (progress != null) 
+                if (progress != null)
                 {
                     progress(gbase, fileLen);
                 }
@@ -241,10 +330,10 @@ internal sealed class LogIndexer : ILogIndexer
             // trailing line with no newline
             if (gbase > lineStart)
             {
-                Emit(doc, si, ts, lineStart, gbase, head, headLen, flat, stride, bigEndian ? 1 : 0, false);
+                Emit(doc, si, ts, zone, lineStart, gbase, head, headLen, flat, stride, bigEndian ? 1 : 0, false);
                 f.LastUnterminated = true;
             }
-            else 
+            else
             {
                 f.LastUnterminated = false;
             }
@@ -305,15 +394,15 @@ internal sealed class LogIndexer : ILogIndexer
 
     [SuppressMessage("Major Code Smell", "S107", Justification = "Signature carries all emit state to avoid temporary allocations.")]
     [SuppressMessage("Major Code Smell", "S3776", Justification = "Emit consolidates parse/write decisions in one hot path.")]
-    private static void Emit(LogDocument doc, int si, ITimestampParser ts, long start, long end, byte[] head, int headLen,
+    private static void Emit(LogDocument doc, int si, ITimestampParser ts, StampZone zone, long start, long end, byte[] head, int headLen,
                      byte[] flat, int stride, int lowByte, bool hadCr)
     {
         var len = (int)Math.Min(end - start, int.MaxValue);
-        if (hadCr && len >= stride) 
+        if (hadCr && len >= stride)
         {
             len -= stride;
         }   // works no matter how long the line is
-        if (len < 0) 
+        if (len < 0)
         {
             len = 0;
         }
@@ -359,12 +448,12 @@ internal sealed class LogIndexer : ILogIndexer
             {
                 lp = JsonLog.Find(src, so, hn, JsonLog.LevelKeys[k]);
             }
-            if (lp >= 0) 
+            if (lp >= 0)
             {
                 sev = JsonLog.Level(JsonLog.Scalar(src, lp, so + hn, 24));
             }
             // CLEF omits the level entirely for Information.
-            if (sev == 0 && own) 
+            if (sev == 0 && own)
             {
                 sev = 3;
             }
@@ -373,12 +462,12 @@ internal sealed class LogIndexer : ILogIndexer
         else
         {
             ts.LastEnd = so;
-            if (ts.Kind != TsKind.None && hn > 0) 
+            if (ts.Kind != TsKind.None && hn > 0)
             {
                 own = ts.Parse(src, so, hn, out t);
             }
             int lvA = -1, lvB = -1;
-            if (hn > 0) 
+            if (hn > 0)
             {
                 sev = LevelScan.Scan(src, so, hn, out lvA, out lvB);
             }
@@ -386,25 +475,25 @@ internal sealed class LogIndexer : ILogIndexer
             if (own)
             {
                 skip = ts.LastEnd - so;
-                if (sev != 0 && lvA >= 0 && lvA - so <= skip + 6) 
+                if (sev != 0 && lvA >= 0 && lvA - so <= skip + 6)
                 {
                     skip = lvB - so;
                 }
-                while (skip < hn && (src[so + skip] == 32 || src[so + skip] == 9)) 
+                while (skip < hn && (src[so + skip] == 32 || src[so + skip] == 9))
                 {
                     skip++;
                 }
-                if (skip < 0 || skip >= hn) 
+                if (skip < 0 || skip >= hn)
                 {
                     skip = 0;
                 }
             }
 
-            if (ts.Kind != TsKind.None) 
+            if (ts.Kind != TsKind.None)
             {
                 flag = own ? (byte)0 : (byte)1;
             }
-            else if (hn > 0 && (src[so] == 32 || src[so] == 9)) 
+            else if (hn > 0 && (src[so] == 32 || src[so] == 9))
 {
     flag = 1;
 }
@@ -415,15 +504,15 @@ internal sealed class LogIndexer : ILogIndexer
         doc.Off[ix] = start;
         doc.Len[ix] = len;
         doc.Sev[ix] = sev;
-        if (own) 
+        if (own)
         {
-            doc.Ts[ix] = t;
+            doc.Ts[ix] = zone.Store(t, ts.LastOffset);
         }
-        else if (ix > 0 && doc.Src[ix - 1] == si) 
+        else if (ix > 0 && doc.Src[ix - 1] == si)
 {
     doc.Ts[ix] = doc.Ts[ix - 1];
 }
-        else 
+        else
         {
             doc.Ts[ix] = double.NaN;
         }
@@ -488,7 +577,7 @@ internal sealed class LogIndexer : ILogIndexer
                         line = new byte[take];
                         Buffer.BlockCopy(buf, p, line, 0, take);
                     }
-                    if (line.Length > 0) 
+                    if (line.Length > 0)
                     {
                         outp.Add(line);
                     }
@@ -523,13 +612,13 @@ internal sealed class LogIndexer : ILogIndexer
             baseIx[d] = m.Srcs.Count;
             foreach (var s in docs[d].Srcs) { s.Lines = 0; m.Srcs.Add(s); }
         }
-        for (var i = 0; i < m.Srcs.Count; i++) 
+        for (var i = 0; i < m.Srcs.Count; i++)
         {
             m.Srcs[i].TintIndex = i;
         }
 
         var total = 0;
-        foreach (var d in docs) 
+        foreach (var d in docs)
         {
             total += d.N;
         }
@@ -542,18 +631,18 @@ internal sealed class LogIndexer : ILogIndexer
             double bestT = 0;
             for (var d = 0; d < docs.Count; d++)
             {
-                if (pos[d] >= docs[d].N) 
+                if (pos[d] >= docs[d].N)
                 {
                     continue;
                 }
                 var t = docs[d].Ts[pos[d]];
-                if (double.IsNaN(t)) 
+                if (double.IsNaN(t))
                 {
                     t = double.NegativeInfinity;
                 }
                 if (best < 0 || t < bestT) { best = d; bestT = t; }
             }
-            if (best < 0) 
+            if (best < 0)
             {
                 break;
             }
@@ -580,5 +669,86 @@ internal sealed class LogIndexer : ILogIndexer
         m.Name = "Merged (" + m.Srcs.Count + " files)";
         SourceLabels.Apply(m);
         return m;
+    }
+
+    // Re-sorts a merged document in place after one file's times have moved, the
+    // same entry-level k-way merge as Merge, reading each file's entries back out in
+    // the order they already had. Marks follow their lines.
+    [SuppressMessage("Major Code Smell", "S3776", Justification = "K-way merge logic preserves entry grouping and time ordering.")]
+    public void Reorder(LogDocument doc)
+    {
+        ArgumentNullException.ThrowIfNull(doc);
+        var n = doc.N;
+        if (n == 0 || doc.Srcs.Count < 2)
+        {
+            return;
+        }
+
+        var starts = new List<int>[doc.Srcs.Count];
+        for (var s = 0; s < starts.Length; s++)
+        {
+            starts[s] = new List<int>();
+        }
+        for (var i = 0; i < n; i++)
+        {
+            if (i == 0 || doc.Flag[i] != 1 || doc.Src[i] != doc.Src[i - 1])
+            {
+                starts[doc.Src[i]].Add(i);
+            }
+        }
+
+        var off = new long[n];
+        var len = new int[n];
+        var sev = new byte[n];
+        var ts = new double[n];
+        var flag = new byte[n];
+        var skip = new byte[n];
+        var src = new byte[n];
+        var moved = new int[n];
+        var pos = new int[starts.Length];
+        var o = 0;
+        while (true)
+        {
+            var best = -1;
+            double bestT = 0;
+            for (var s = 0; s < starts.Length; s++)
+            {
+                if (pos[s] >= starts[s].Count)
+                {
+                    continue;
+                }
+                var t = doc.Ts[starts[s][pos[s]]];
+                if (double.IsNaN(t))
+                {
+                    t = double.NegativeInfinity;
+                }
+                if (best < 0 || t < bestT) { best = s; bestT = t; }
+            }
+            if (best < 0)
+            {
+                break;
+            }
+            var i = starts[best][pos[best]++];
+            do
+            {
+                off[o] = doc.Off[i]; len[o] = doc.Len[i]; sev[o] = doc.Sev[i]; ts[o] = doc.Ts[i];
+                flag[o] = doc.Flag[i]; skip[o] = doc.Skip[i]; src[o] = doc.Src[i];
+                moved[i] = o;
+                o++; i++;
+            } while (i < n && doc.Flag[i] == 1 && doc.Src[i] == best);
+        }
+
+        Array.Copy(off, doc.Off, n); Array.Copy(len, doc.Len, n); Array.Copy(sev, doc.Sev, n);
+        Array.Copy(ts, doc.Ts, n); Array.Copy(flag, doc.Flag, n); Array.Copy(skip, doc.Skip, n);
+        Array.Copy(src, doc.Src, n);
+        var marks = new List<int>(doc.Marks);
+        doc.Marks.Clear();
+        foreach (var m in marks)
+        {
+            if (m < n)
+            {
+                doc.Marks.Add(moved[m]);
+            }
+        }
     }
 }

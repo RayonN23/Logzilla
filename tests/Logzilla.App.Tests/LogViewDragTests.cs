@@ -58,6 +58,8 @@ public sealed class LogViewDragTests
 
         public LogDocument Merge(IReadOnlyList<LogDocument> documents) => throw new NotSupportedException();
 
+        public void Reorder(LogDocument document) => throw new NotSupportedException();
+
         public ILineReader OpenReader(LogDocument document, int bufferSize) => new FakeReader();
     }
 

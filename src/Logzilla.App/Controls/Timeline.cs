@@ -20,6 +20,11 @@ internal sealed class Timeline : Control
     public FilterResult Res;
     public LogView View;
     public double T0 = double.NaN, T1 = double.NaN;
+
+    /// <summary>The clock the labels read in. The chart itself is laid out in stored
+    /// time, so the bars do not move when this changes; only what they are called.</summary>
+    public TimeMode TimeMode = TimeMode.AsWritten;
+    public TimeZoneInfo LocalZone = TimeZoneInfo.Local;
     public event EventHandler<RangeArgs> RangeSelected;
     public event EventHandler<SeekArgs> Seek;
 
@@ -290,7 +295,7 @@ internal sealed class Timeline : Control
 
         if (Res != null && !double.IsNaN(Res.Lo))
         {
-            var rangeText = DisplayFormatter.Time(Res.Lo) + "  –  " + DisplayFormatter.Time(Res.Hi);
+            var rangeText = DisplayFormatter.Time(Shown(Res.Lo)) + "  –  " + DisplayFormatter.Time(Shown(Res.Hi));
             var rangeW = TextRenderer.MeasureText(g, rangeText, Theme.MonoTiny, new Size(short.MaxValue, short.MaxValue), Theme.TextFlags).Width;
             var rangeX = (resetOn ? resetX - Dpi.S(16) : w - pad) - rangeW;
             TextRenderer.DrawText(g, rangeText, Theme.MonoTiny, new Rectangle(rangeX, y, rangeW + 2, strip.Height), Theme.TextDim, Theme.TextFlags);
@@ -328,6 +333,9 @@ internal sealed class Timeline : Control
         }
     }
 
+    /// <summary>A stored time in the clock the labels read in, by the document's reference file.</summary>
+    private double Shown(double ms) => TimeZones.Display(ms, TimeZones.Reference(File), TimeMode, LocalZone);
+
     private static string ShortAxisLabel(double ms)
     {
         var full = DisplayFormatter.Time(ms);
@@ -351,7 +359,7 @@ internal sealed class Timeline : Control
         {
             var t = Res.Lo + (Res.Hi - Res.Lo) * i / marks;
             var x = (int)((double)i / marks * w);
-            var label = ShortAxisLabel(t);
+            var label = ShortAxisLabel(Shown(t));
             var lw = TextRenderer.MeasureText(g, label, Theme.MonoTiny, new Size(short.MaxValue, short.MaxValue), Theme.TextFlagsPoint).Width;
             var lx = Math.Clamp(x - lw / 2, Dpi.S(Inset), w - lw - Dpi.S(Inset));
             TextRenderer.DrawText(g, label, Theme.MonoTiny, new Point(lx, y), Theme.TextDim, Theme.TextFlagsPoint);
@@ -361,7 +369,7 @@ internal sealed class Timeline : Control
     private void DrawHoverCard(Graphics g, int w, int chartTop, int baseY, float bw, int nb)
     {
         var bi = Math.Max(0, Math.Min(nb - 1, (int)(_curX / bw)));
-        var timeLabel = DisplayFormatter.Time(XToT(_curX));
+        var timeLabel = DisplayFormatter.Time(Shown(XToT(_curX)));
         var entries = DisplayFormatter.Number(Res.Bucket[bi]) + " entries";
         var errText = DisplayFormatter.Number(Res.BucketErr[bi]) + " err";
 

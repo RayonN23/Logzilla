@@ -15,5 +15,8 @@ public interface ILogIndexer
     /// <summary>Interleaves several documents by time into one.</summary>
     LogDocument Merge(IReadOnlyList<LogDocument> documents);
 
+    /// <summary>Re-sorts a merged document after one of its files' times have moved.</summary>
+    void Reorder(LogDocument document);
+
     ILineReader OpenReader(LogDocument document, int bufferSize);
 }

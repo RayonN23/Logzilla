@@ -97,6 +97,7 @@ internal sealed partial class MainForm : Form
             return;
         }
 
+        ApplySavedZone(src);
         src.TintIndex = _docs.Count;
 
         var doc = new LogDocument();
@@ -195,6 +196,15 @@ internal sealed partial class MainForm : Form
             return;
         }
 
+        // Files whose zone is known are merged by the instant each line happened; a
+        // file whose zone nobody knows can only be placed by its wall clock, which is
+        // hours out if it was not written in UTC. Ask rather than let it slide.
+        var known = parts.Exists(d => TimeZones.IsKnown(d.Srcs[0]));
+        if (known)
+        {
+            AskUndeclared(parts.ConvertAll(d => d.Srcs[0]));
+        }
+
         Cursor = Cursors.WaitCursor;
         try
         {
@@ -279,6 +289,7 @@ internal sealed partial class MainForm : Form
             {
                 // the file was truncated or rotated: start over
                 f.N = 0; src.Lines = 0; src.IndexedTo = src.DataStart; src.LastUnterminated = false;
+                src.Offsets.Clear();
                 f.Marks.Clear();
             }
             else if (src.LastUnterminated && f.N > 0) { f.N--; src.Lines--; }
