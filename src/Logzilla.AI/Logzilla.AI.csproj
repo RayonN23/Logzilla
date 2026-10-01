@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The AI assistant: the read-only tools a model may call, redaction, and one thin
+       adapter per provider. The engine and the UI know nothing about any vendor; every
+       AI package is referenced here and nowhere else. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Logzilla.AI</RootNamespace>
+    <AssemblyName>Logzilla.AI</AssemblyName>
+    <Description>AI assistant for Logzilla: log tools, redaction and model providers.</Description>
+  </PropertyGroup>
+
+  <!-- The Copilot SDK can bundle its whole runtime (about 200 MB) into the build. It
+       stays out unless a build asks for it with /p:BundleCopilot=true: the installer
+       stays small, and an organisation that turns AI off never ships the extra
+       program. Without it, Logzilla uses a Copilot CLI the user already installed. -->
+  <PropertyGroup>
+    <CopilotSkipCliDownload Condition="'$(BundleCopilot)' != 'true'">true</CopilotSkipCliDownload>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Logzilla.Core\Logzilla.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Logzilla.AI.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Anthropic" Version="12.50.0" />
+    <PackageReference Include="GitHub.Copilot.SDK" Version="1.0.14" />
+    <PackageReference Include="Microsoft.Extensions.AI" Version="10.10.0" />
+    <PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="10.10.1" />
+    <PackageReference Include="OpenAI" Version="2.14.0" />
+  </ItemGroup>
+
+</Project>
