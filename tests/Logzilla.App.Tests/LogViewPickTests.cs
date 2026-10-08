@@ -30,7 +30,8 @@ public sealed class LogViewPickTests
     private const string Record =
         "{\"@t\":\"2026-06-18T16:33:46Z\",\"@mt\":\"Device {DeviceId} checked in\",\"DeviceId\":\"ABC-42\"," +
         "\"Name\":\"CheckIn\",\"SourceContext\":\"Soti.Service\",\"Feature\":\"DeviceAction\",\"Tenant\":\"acme\"," +
-        "\"Region\":\"eu\",\"CorrelationId\":\"136ea017-3946\",\"ThreadId\":7}";
+        "\"Region\":\"eu\",\"CorrelationId\":\"136ea017-3946\",\"ThreadId\":7," +
+        "\"RequestPath\":\"/DeviceManagement.svc/WindowsDesktop/Windows10RS/Enrollment/DeviceEnrollmentService/Policies/CheckIn?attempt=3&retry=true\"}";
 
     private sealed class JsonReader : ILineReader
     {
@@ -157,5 +158,78 @@ public sealed class LogViewPickTests
 
         Assert.That(word, Is.EqualTo("checked"));
         Assert.That(key, Is.Null);
+    }
+
+    private static void Click(LogView view, Point at, int clicks = 1) =>
+        typeof(LogView).GetMethod("OnMouseDown", BindingFlags.NonPublic | BindingFlags.Instance)
+                       .Invoke(view, [new MouseEventArgs(MouseButtons.Left, clicks, at.X, at.Y, 0)]);
+
+    /// <summary>A point on the selected row's first line, clear of the field list.</summary>
+    private static Point OnTheHeaderLine(LogView view) => new(ViewWidth / 3, view.RowHeight / 2);
+
+    [Test]
+    public void ClickingTheExpandedRowAgainFoldsItAndOnceMoreOpensIt()
+    {
+        // The team's report: clicking an expanded line again did nothing; it stayed open.
+        using var view = Selected();
+        Assert.That(view.IsExpanded, Is.True);
+
+        Click(view, OnTheHeaderLine(view));
+        Paint(view);
+
+        Assert.That(view.IsExpanded, Is.False, "The second click folds it back to one line.");
+        Assert.That(view.Selected, Is.EqualTo(0), "It stays selected.");
+        Assert.That(Runs(view).Any(r => r.Key != null), Is.False, "The field list is gone.");
+
+        Click(view, OnTheHeaderLine(view));
+
+        Assert.That(view.IsExpanded, Is.True, "And a third opens it again.");
+    }
+
+    [Test]
+    public void EscapeFoldsTheExpandedRow()
+    {
+        using var view = Selected();
+
+        Assert.That(view.Collapse(), Is.True);
+        Assert.That(view.IsExpanded, Is.False);
+        Assert.That(view.Collapse(), Is.False, "Nothing left to fold.");
+    }
+
+    [Test]
+    public void AQuickSelectThenDeselectFoldsTheRowHoweverFastTheClicks()
+    {
+        // The team's report: selecting and deselecting quickly was flaky. Two quick clicks
+        // are a double-click to Windows, and the second click used to be taken as "pick a
+        // word into Find": the row stayed open and the view re-filtered on that word.
+        using var view = Selected();
+        view.ClearSelection();
+        Paint(view);
+        var at = OnTheHeaderLine(view);
+        var up = typeof(LogView).GetMethod("OnMouseUp", BindingFlags.NonPublic | BindingFlags.Instance);
+
+        Click(view, at);                                    // select: it opens
+        up.Invoke(view, [new MouseEventArgs(MouseButtons.Left, 1, at.X, at.Y, 0)]);
+        Assert.That(view.IsExpanded, Is.True);
+        Paint(view);
+        Click(view, at, clicks: 2);                         // the quick second click: it folds
+        up.Invoke(view, [new MouseEventArgs(MouseButtons.Left, 2, at.X, at.Y, 0)]);
+
+        Assert.That(view.Selected, Is.EqualTo(0));
+        Assert.That(view.IsExpanded, Is.False);
+        Assert.That(typeof(LogView).GetEvent("WordPicked"), Is.Null, "Double-click no longer searches for the word under it.");
+    }
+
+    [Test]
+    public void ALongFieldValueWrapsInsteadOfBeingCutOff()
+    {
+        // "Soti.MobiControl.WindowsModern.Ser..." — a value wider than its column used to
+        // end in "...". It now takes the lines it needs, and copies whole.
+        using var view = Selected();
+        var path = Runs(view).Single(r => r.Key == "RequestPath");
+        var corr = Runs(view).Single(r => r.Key == "CorrelationId");
+
+        Assert.That(path.Bounds.Height, Is.GreaterThan(corr.Bounds.Height), "The long value's row grew to fit it.");
+        Assert.That(path.Text, Does.EndWith("retry=true"), "And the value is all there.");
     }
 }

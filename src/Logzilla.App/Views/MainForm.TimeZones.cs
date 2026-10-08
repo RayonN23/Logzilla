@@ -7,6 +7,7 @@ using Logzilla.App.Controls;
 using Logzilla.App.Dialogs;
 using Logzilla.App.Infrastructure;
 using Logzilla.Core.Common;
+using Logzilla.Core.Formats;
 using Logzilla.Core.Logs;
 
 namespace Logzilla.App.Views;
@@ -19,7 +20,7 @@ namespace Logzilla.App.Views;
 // stamps carry no zone is asked about, never guessed: its last-modified time can
 // suggest an answer, but only the user can give one.
 
-internal sealed partial class MainForm : Form
+internal sealed partial class MainForm
 {
     private static readonly string[] TimeModeLabels = { "Log time", "Local time", "UTC" };
 
@@ -57,7 +58,10 @@ internal sealed partial class MainForm : Form
     {
         var times = new ToolStripMenuItem("Show times");
         _miTimeModes = BuildTimeModeItems();
-        times.DropDownItems.AddRange(_miTimeModes);
+        foreach (var item in _miTimeModes)
+        {
+            times.DropDownItems.Add(item);
+        }
         return times;
     }
 
@@ -158,7 +162,7 @@ internal sealed partial class MainForm : Form
             FillSide();
             return;
         }
-        if (f.Srcs[0].Kind == Logzilla.Core.Formats.TsKind.None)
+        if (f.Srcs[0].Kind == TsKind.None)
         {
             Info(f.Srcs[0].Name + " has no timestamps Logzilla recognises, so there is no zone to set.");
             return;
@@ -169,7 +173,7 @@ internal sealed partial class MainForm : Form
     /// <summary>One file's zone in the Sources panel; clickable when it is the user's to set.</summary>
     private void AddZoneRow(List<PanelRow> rows, LogSource s, int index)
     {
-        var settable = !s.Zoned && s.Kind != Logzilla.Core.Formats.TsKind.None;
+        var settable = !s.Zoned && s.Kind != TsKind.None;
         PanelRow row;
         if (settable && s.Declared == null)
         {
@@ -286,14 +290,14 @@ internal sealed partial class MainForm : Form
         {
             return;
         }
-        if (_progPct >= 0)
+        if (_indexing.Count > 0)
         {
             Info("Wait for indexing to finish, then set the time zone.");
             return;
         }
         var old = s.Declared;
         _cfg.Set(ZoneKey(s.Path), zone == null ? "" : TimeZones.Name(zone, _localZone));
-        if (old == zone || (old != null && zone != null && old.Id == zone.Id))
+        if (ReferenceEquals(old, zone) || (old != null && zone != null && old.Id == zone.Id))
         {
             return;
         }
@@ -321,7 +325,7 @@ internal sealed partial class MainForm : Form
     /// <summary>Applies what the user said about this file last time, before it is indexed.</summary>
     private void ApplySavedZone(LogSource s)
     {
-        if (!s.Zoned && s.Kind != Logzilla.Core.Formats.TsKind.None)
+        if (!s.Zoned && s.Kind != TsKind.None)
         {
             s.Declared = TimeZones.FromName(_cfg.Get(ZoneKey(s.Path), ""), _localZone);
             if (_cfg.Get(ZoneKey(s.Path), null) != null)

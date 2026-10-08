@@ -39,20 +39,6 @@ internal static class FileAssociations
         return key;
     }
 
-    public static bool IsRegistered()
-    {
-        try
-        {
-            using (var k =
-                Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Classes\" + ProgId))
-
-            {
-                return k != null;
-            }
-        }
-        catch { return false; }
-    }
-
     [SuppressMessage("Reliability", "S2259", Justification = "Registry keys are guarded by RequireKey checks.")]
     [SuppressMessage("Major Code Smell", "S3776", Justification = "Registry setup is intentionally explicit.")]
     public static void Register(string exe)

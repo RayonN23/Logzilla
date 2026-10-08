@@ -1,5 +1,27 @@
 # What's new in Logzilla
 
+## 3.1.0
+
+### New
+- Add highlights right on the **Highlighting** tab: type a word or phrase at the top and press Enter, or turn on **.\*** for a regular expression
+- Right-click any highlight to switch it on or off, change its colour, match it as a regular expression, or remove it
+
+### Changed
+- Tabs renamed: **Colors** is now **Highlighting**, **Marks** is now **Bookmarks**, and **Ask** is now **AI Chat**
+- Logzilla no longer adds highlights of its own, so nothing is coloured until you choose to. The three it used to add for errors, timeouts and IP addresses are removed; highlights you added yourself are kept
+
+### Improved
+- Each tab keeps its own search: switching tabs no longer carries what you typed to the other log, and switching back brings your search, severity chips, time range and field filters back with it
+- Changing the filter keeps your place: pick an entry while showing only errors, switch the other severities back on, and that entry stays right where it was on screen with its surrounding lines around it
+- Click an expanded entry again to fold it back to one line, or press **Esc**; click once more to open it. This works however quickly you click
+- Double-clicking a word no longer adds it to the Find box, because it got in the way of clicking entries open and closed. Right-click the word and choose **Find** instead
+- Long messages are always shown in full: no more "..." at the end of a long line, a long exception headline in a JSON log, or a long value in an expanded entry's fields
+- With **Wrap** on, very long messages wrap onto as many lines as they need; scroll with the mouse wheel to read to the end
+
+### Fixed
+- Highlights no longer disappear when you click a highlighted line open
+- Closing a tab to the left of the one you are reading no longer switches you to a different log
+
 ## 3.0.0
 
 ### New

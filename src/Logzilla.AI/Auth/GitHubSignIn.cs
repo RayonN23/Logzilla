@@ -32,8 +32,8 @@ public sealed class GitHubSignInException(string message) : Exception(message);
 /// </summary>
 public sealed class GitHubSignIn
 {
-    public const string Host = "https://github.com";
-    public const string Api = "https://api.github.com";
+    private const string Host = "https://github.com";
+    private const string Api = "https://api.github.com";
     private const string DeviceGrant = "urn:ietf:params:oauth:grant-type:device_code";
 
     private readonly HttpClient _http;

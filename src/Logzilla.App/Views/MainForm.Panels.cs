@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Text.RegularExpressions;
 using System.Text;
+using System.Threading;
 using System.Windows.Forms;
 using Logzilla.App.Controls;
 using Logzilla.App.Infrastructure;
@@ -24,6 +25,11 @@ internal sealed partial class MainForm : Form
     private void FillSide()
     {
         SyncSideTabs();
+        if (_sideTab == "ask")
+        {
+            RefreshAsk();
+            return;
+        }
         var f = F;
         if (f == null || _res == null)
         {
@@ -42,14 +48,10 @@ internal sealed partial class MainForm : Form
 {
     _side.SetItems(BuildSources(f));
 }
-        else if (_sideTab == "fields")
-{
-    _side.SetItems(BuildFields(f));
-}
-        else if (_sideTab == "patterns")
-{
-    _side.SetItems(BuildPatterns(f));
-}
+        else if (_sideTab == "fields" || _sideTab == "patterns")
+        {
+            FillSampledPanel(f);
+        }
         else if (_sideTab == "marks")
         {
             _side.SetItems(BuildMarks(f));
@@ -161,12 +163,12 @@ internal sealed partial class MainForm : Form
             it.Tag = "lv:" + i;
             l.Add(it);
         }
-        var bursts = BuildBursts(f);
+        var bursts = BuildBursts();
         if (bursts.Count > 0) { l.Add(Head("BUSIEST ERROR WINDOWS")); l.AddRange(bursts); }
         return l;
     }
 
-    private List<PanelRow> BuildBursts(LogDocument f)
+    private List<PanelRow> BuildBursts()
     {
         var l = new List<PanelRow>();
         if (_res.BucketErr == null || double.IsNaN(_res.Lo) || _res.Hi <= _res.Lo)
@@ -190,6 +192,7 @@ internal sealed partial class MainForm : Form
             var it = new PanelRow(DisplayFormatter.Time(ShownTime(t)), DisplayFormatter.Number(_res.BucketErr[idx[k]]));
             it.Accent = Theme.SevColor[5];
             it.Chevron = true;
+            it.Unit = "errors";
             it.Bar = (float)_res.BucketErr[idx[k]] / Math.Max(1, top);
             it.Tag = "time:" + t.ToString("R", CultureInfo.InvariantCulture);
             l.Add(it);
@@ -207,11 +210,68 @@ internal sealed partial class MainForm : Form
     [GeneratedRegex("\\[([^\\]\\[]{1,48})\\]")]
     private static partial Regex RxTag { get; }
 
-    private List<PanelRow> BuildFields(LogDocument f)
+    /// <summary>Bumped by every refresh of a sampled panel, so a build that finishes
+    /// after a newer one has started is dropped instead of shown.</summary>
+    private int _sampledGen;
+
+    /// <summary>The last sampled panel built: which tab, for which result, and its rows.</summary>
+    private (string Tab, FilterResult Res, List<PanelRow> Rows) _sampled;
+
+    /// <summary>
+    /// Fields and Patterns read and parse tens of thousands of entries: a few hundred
+    /// milliseconds that used to freeze the window after every search, and every second
+    /// while following a file. They are built on a worker thread now, and kept for the
+    /// result they describe, so coming back to the tab costs nothing.
+    /// </summary>
+    private void FillSampledPanel(LogDocument f)
+    {
+        var tab = _sideTab;
+        var res = _res;
+        var gen = ++_sampledGen;
+        if (_sampled.Tab == tab && ReferenceEquals(_sampled.Res, res))
+        {
+            _side.SetItems(_sampled.Rows);
+            return;
+        }
+        if (_sampled.Tab != tab)
+        {
+            // The other panel's rows would be wrong meanwhile. This panel's rows for an
+            // older result are only out of date, and less jarring than a blank.
+            _side.SetItems([Head(tab == "fields" ? "READING FIELDS ..." : "FINDING PATTERNS ...")]);
+        }
+        ThreadPool.QueueUserWorkItem(delegate
+        {
+            List<PanelRow> rows;
+            try
+            {
+                rows = tab == "fields" ? BuildFields(f, res) : BuildPatterns(f, res);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ObjectDisposedException)
+            {
+                IgnoreNonCritical(ex, "Build " + tab);
+                return;
+            }
+            try
+            {
+                BeginInvoke((MethodInvoker)delegate
+                {
+                    if (gen != _sampledGen || _sideTab != tab)
+                    {
+                        return;
+                    }
+                    _sampled = (tab, res, rows);
+                    _side.SetItems(rows);
+                });
+            }
+            catch (InvalidOperationException ex) { IgnoreNonCritical(ex, "Show " + tab); }
+        });
+    }
+
+    private List<PanelRow> BuildFields(LogDocument f, FilterResult res)
     {
         var outp = new List<PanelRow>();
         var fields = new Dictionary<string, Dictionary<string, int>>();
-        var cnt = _res.View.Count;
+        var cnt = res.View.Count;
         var step = Math.Max(1, cnt / 40000);
         var scanned = 0;
         var named = new List<string>();
@@ -220,7 +280,7 @@ internal sealed partial class MainForm : Form
         {
             for (var k = 0; k < cnt; k += step)
             {
-                var i = _res.View[k];
+                var i = res.View[k];
                 string s;
                 try { s = feed.Text(i); }
                 catch { continue; }
@@ -403,17 +463,17 @@ internal sealed partial class MainForm : Form
 
     private sealed class Tpl { public int N; public int First; public byte Sev; }
 
-    private List<PanelRow> BuildPatterns(LogDocument f)
+    private List<PanelRow> BuildPatterns(LogDocument f, FilterResult res)
     {
         var map = new Dictionary<string, Tpl>();
-        var cnt = _res.View.Count;
+        var cnt = res.View.Count;
         var step = Math.Max(1, cnt / 60000);
         var scanned = 0;
         using (var feed = _indexer.OpenReader(f, 1 << 20))
         {
             for (var k = 0; k < cnt; k += step)
             {
-                var i = _res.View[k];
+                var i = res.View[k];
                 if (f.Flag[i] == 1)
                 {
                     continue;
@@ -537,35 +597,37 @@ internal sealed partial class MainForm : Form
         var l = new List<PanelRow>();
         if (f.Marks.Count == 0)
         {
-            l.Add(Head("NO MARKS YET"));
-            l.Add(Kv("M   mark / unmark the selected entry", ""));
-            l.Add(Kv("B / Shift+B   next / previous mark", ""));
+            l.Add(Head("NO BOOKMARKS YET"));
+            l.Add(Kv("M   bookmark the selected entry, or remove it", ""));
+            l.Add(Kv("B / Shift+B   next / previous bookmark", ""));
             return l;
         }
         var ms = new List<int>(f.Marks);
         ms.Sort();
-        l.Add(Head(DisplayFormatter.Number(ms.Count) + " MARKED  (B / Shift+B to navigate)"));
-        var cp = new PanelRow("Copy all marked entries", ""); cp.Accent = Theme.Accent; cp.Tag = "copymarks"; l.Add(cp);
-        var cl = new PanelRow("Clear marks", ""); cl.Accent = Theme.Text3; cl.Tag = "clearmarks"; l.Add(cl);
+        l.Add(Head(DisplayFormatter.Number(ms.Count) + " BOOKMARKED  (B / Shift+B to navigate)"));
+        var cp = new PanelRow("Copy all bookmarked entries", ""); cp.Accent = Theme.Accent; cp.Tag = "copymarks"; l.Add(cp);
+        var cl = new PanelRow("Clear bookmarks", ""); cl.Accent = Theme.Text3; cl.Tag = "clearmarks"; l.Add(cl);
         l.Add(Head("ENTRIES"));
-        using (var feed = _indexer.OpenReader(f, 1 << 18))
+        // The message as the grid shows it: without the timestamp and level the right-hand
+        // column already gives, and a JSON record as its sentence rather than raw JSON.
+        foreach (var i in ms)
         {
-            foreach (var i in ms)
+            var t = _view.ReadableTextOf(i);
+            var nlAt = t.IndexOf('\n');
+            if (nlAt >= 0)
             {
-                string t;
-                try { t = feed.Text(i); }
-                catch { t = ""; }
-                if (t.Length > 120)
-                {
-                    t = t.Substring(0, 120);
-                }
-                var timeStr = ShowLineTime(f, i);
-                var right = "#" + DisplayFormatter.Number(i + 1) + (timeStr.Length > 0 ? "  " + timeStr : "");
-                var it = new PanelRow(t, right);
-                it.Accent = f.Sev[i] > 0 ? Theme.SevColor[f.Sev[i]] : Theme.SevColor[4];
-                it.Tag = "jump:" + i + "|";
-                l.Add(it);
+                t = t[..nlAt].TrimEnd('\r');
             }
+            if (t.Length > 120)
+            {
+                t = t.Substring(0, 120);
+            }
+            var timeStr = ShowLineTime(f, i);
+            var right = "#" + DisplayFormatter.Number(i + 1) + (timeStr.Length > 0 ? "  " + timeStr : "");
+            var it = new PanelRow(t, right);
+            it.Accent = f.Sev[i] > 0 ? Theme.SevColor[f.Sev[i]] : Theme.SevColor[4];
+            it.Tag = "jump:" + i + "|";
+            l.Add(it);
         }
         return l;
     }
@@ -573,18 +635,25 @@ internal sealed partial class MainForm : Form
     private List<PanelRow> BuildColors()
     {
         var l = new List<PanelRow>();
-        l.Add(Head("HIGHLIGHT RULES"));
-        l.Add(Kv("click to toggle, Ctrl+click to recolour", ""));
+        l.Add(Head("HIGHLIGHTS"));
+        if (_rules.Count == 0)
+        {
+            l.Add(Kv("Nothing is highlighted yet.", ""));
+            l.Add(Kv("Type a word or phrase above and press Enter.", ""));
+            l.Add(Kv("Or right-click a word in the log and choose Highlight.", ""));
+        }
+        else
+        {
+            l.Add(Kv("click to switch on or off  ·  right-click for more", ""));
+        }
         for (var i = 0; i < _rules.Count; i++)
         {
-            var it = new PanelRow(_rules[i].Pattern, _rules[i].On ? "on" : "off");
+            var it = new PanelRow(_rules[i].Pattern, (_rules[i].IsRegex ? "regex  " : "") + (_rules[i].On ? "on" : "off"));
             it.Accent = _rules[i].On ? _rules[i].C : Theme.TextDim;
             it.Tag = "rule:" + i;
             l.Add(it);
         }
-        l.Add(Head("ACTIONS"));
-        var a = new PanelRow("Add rule from the Find box", ""); a.Accent = Theme.Accent; a.Tag = "addrule"; l.Add(a);
-        var b = new PanelRow("Remove last rule", ""); b.Accent = Theme.Text3; b.Tag = "delrule"; l.Add(b);
+        l.Add(Head("SETUP"));
         var c = new PanelRow("Save setup to file", ""); c.Accent = Theme.Text3; c.Tag = "savecfg"; l.Add(c);
         var d = new PanelRow("Load setup from file", ""); d.Accent = Theme.Text3; d.Tag = "loadcfg"; l.Add(d);
         return l;
@@ -598,8 +667,10 @@ internal sealed partial class MainForm : Form
         }
         var f = F;
         var cnt = f != null ? f.Marks.Count : 0;
-        _bMarksSideTab.Text = cnt > 0 ? "Marks " + cnt : "Marks";
+        _bMarksSideTab.Text = cnt > 0 ? "Bookmarks " + cnt : "Bookmarks";
         _bMarksSideTab.FitTo(40, Theme.TitleBarHeight, 8);
+        // "Bookmarks 12" is wider than "Bookmarks", which can push the last tab onto a new row.
+        FitSideTabs();
     }
 
     private void FillEntry(LogDocument f)
@@ -634,21 +705,25 @@ internal sealed partial class MainForm : Form
             // The whole entry, header line plus every continuation under it — a
             // wrapped XML payload or a stack trace is one entry, not five rows.
             var body = new StringBuilder(_view.TextOf(i));
-            var extra = 0;
-            for (var j = i + 1; j < f.N && f.Flag[j] == 1 && extra < MaxContinuationLines; j++, extra++)
-
+            var j = i + 1;
+            for (; j < f.N && f.Flag[j] == 1 && j - i <= MaxContinuationLines; j++)
             {
                 body.Append('\n').Append(_view.TextOf(j));
             }
             sb.AppendLine(Readable(body.ToString()));
+            if (j < f.N && f.Flag[j] == 1)
+            {
+                sb.AppendLine("... the entry continues past line " + DisplayFormatter.Number(j));
+            }
         }
         _entry.Text = sb.ToString();
         _entry.Select(0, 0);
     }
 
     /// <summary>How far past an entry's header line the panel will follow its
-    /// continuations before it stops.</summary>
-    private const int MaxContinuationLines = 400;
+    /// continuations: every line of any real payload, but not an entire file whose
+    /// lines carry no timestamps and so all hang off the first one.</summary>
+    private const int MaxContinuationLines = 50_000;
 
     /// <summary>Indents an embedded XML payload; anything else comes back untouched.
     /// The panel is the one place with room to lay a payload out properly.</summary>
@@ -748,40 +823,23 @@ internal sealed partial class MainForm : Form
         else if (tag.StartsWith("rule:", StringComparison.Ordinal))
         {
             var i = int.Parse(tag.AsSpan(5), NumberStyles.Integer, CultureInfo.InvariantCulture);
+            if (i >= _rules.Count)
+            {
+                return;
+            }
+            if (e.Right)
+            {
+                ShowRuleMenu(i);
+                return;
+            }
             if (e.Ctrl)
             {
-                using (var cd = new ColorDialog())
-                {
-                    cd.Color = _rules[i].C;
-                    if (cd.ShowDialog(this) == DialogResult.OK)
-                    {
-                        _rules[i].C = cd.Color;
-                    }
-                }
+                RecolourRule(_rules[i]);
+                return;
             }
-            else
-            {
-                _rules[i].On = !_rules[i].On;
-            }
-            _view.Invalidate(); FillSide();
+            _rules[i].On = !_rules[i].On;
+            RulesChanged();
         }
-        else if (tag == "addrule")
-        {
-            if (_q.Text.Trim().Length > 0)
-            {
-                var r = new HighlightRule();
-                r.Pattern = _q.Text.Trim();
-                r.IsRegex = _regex;
-                r.C = Palette.Pick(_rules.Count + 3);
-                _rules.Add(r);
-                _view.Invalidate(); FillSide();
-            }
-            else
-            {
-                Info("Type something in the Find box first, then add it as a colour rule.");
-            }
-        }
-        else if (tag == "delrule") { if (_rules.Count > 0) { _rules.RemoveAt(_rules.Count - 1); _view.Invalidate(); FillSide(); } }
         else if (tag == "copymarks")
 {
     CopyMarks();

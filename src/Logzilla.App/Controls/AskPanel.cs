@@ -46,7 +46,7 @@ internal sealed class AskPanel : Control
     public AskPanel()
     {
         AccessibleRole = AccessibleRole.Pane;
-        AccessibleName = "Ask about this log";
+        AccessibleName = "AI Chat";
         BackColor = Theme.BgChrome;
         SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
 

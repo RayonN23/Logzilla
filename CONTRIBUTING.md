@@ -72,9 +72,39 @@ public void SyslogTakesTheYearFromTheFile()
 }
 ```
 
-The engine and the installer are covered; the UI is not. If you change parsing,
+The engine, the installer and the UI logic are covered. If you change parsing,
 indexing, querying, merging or installation, add a test. Run `dotnet test`
 before opening a pull request.
+
+### End-to-end tests
+
+`tests/Logzilla.App.E2E` starts the real `Logzilla.exe` and drives it through
+Windows UI Automation with [FlaUI](https://github.com/FlaUI/FlaUI): it opens the
+sample logs, searches, toggles chips, switches tabs and types, then checks what
+the window reports. They open windows and send keystrokes, so they are skipped
+unless asked for:
+
+```powershell
+$env:LOGZILLA_E2E = '1'
+dotnet test tests\Logzilla.App.E2E
+```
+
+or as part of a full build with `.\build\build.ps1 -E2E`. A plain `build.ps1`
+runs the unit tests only.
+
+They need an unlocked, interactive desktop. Each run gets a throwaway settings
+folder (`LOGZILLA_DATA_DIR`), so your own settings and recent files are never
+touched. Keystrokes are only sent while Logzilla is the foreground window; if
+another window takes focus, the test stops as inconclusive instead of typing
+into it. Screenshots of Logzilla's own window (never the screen) are saved under
+`e2e-screenshots` in the test output and attached to the results.
+
+Controls are found by automation id, which is the control's `Name` in the app —
+`SearchBox`, `WrapChip`, `LogGrid`, `SideTab.ask` and so on. The custom-drawn
+controls report their state for this: chips and tabs say whether they are on and
+can be pressed, the scroll bars give their position (`"0 of 120"`, or `"none"`
+when there is nothing to scroll), and the grid says which results are on screen
+(`"showing 1 to 20 of 30"`). Give a new control a `Name` if a test needs it.
 
 ## Code style
 

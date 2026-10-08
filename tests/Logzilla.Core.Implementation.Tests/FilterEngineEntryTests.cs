@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Text;
 using Logzilla.Core.Implementation.Logs;
 using Logzilla.Core.Implementation.Query;
@@ -199,6 +200,38 @@ public class FilterEngineEntryTests
 
         Assert.That(result.View, Has.Count.EqualTo(5));
         Assert.That(result.Matches, Is.EquivalentTo(HeaderOnly));
+    }
+
+    [Test]
+    public void ContextLinesAfterAnEntryAreCountedFromItsEndNotItsHeader()
+    {
+        // One line of context around the three-line entry: the line before its header,
+        // and the line after its last frame — not a line inside the entry itself.
+        var spec = QuerySpec.Build("failed", regex: false, cs: false, mask: 0x7F, srcMask: -1L,
+            t0: double.NaN, t1: double.NaN, ctx: 1, group: true, filter: true);
+
+        var result = Run(_document, spec);
+
+        Assert.That(result.View, Has.Count.EqualTo(5), "Lines 0 and 4 are the context either side.");
+    }
+
+    [Test]
+    public void HighlightModeMarksWhereTheHitsAreForTheMinimap()
+    {
+        var result = Run(_document, Query("recovered", filter: false));
+
+        Assert.That(result.HitSlots, Is.Not.Null, "Some rows are hits and some are not.");
+        Assert.That(result.HitSlots[FilterResult.Slots - 1], Is.True, "The hit is the last of five rows.");
+        Assert.That(result.HitSlots.Count(h => h), Is.EqualTo(1));
+    }
+
+    [Test]
+    public void WhenEveryRowShownIsAHitTheMinimapHasNothingToAdd()
+    {
+        var result = Run(_document, Query("recovered"));
+
+        Assert.That(result.View, Has.Count.EqualTo(1));
+        Assert.That(result.HitSlots, Is.Null);
     }
 
     [Test]

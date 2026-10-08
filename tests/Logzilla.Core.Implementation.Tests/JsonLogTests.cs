@@ -156,12 +156,15 @@ public class JsonLogTests
         "\"@x\":\"" + ex.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\r", "\\r").Replace("\n", "\\n") + "\"}";
 
     [Test]
-    public void TheGridSummaryStillClipsALongException()
+    public void TheGridSummaryShowsTheWholeExceptionHeadlineOnOneLine()
     {
         var summary = JsonLog.Line(WithException(LongException));
 
-        Assert.That(summary, Does.EndWith(" ..."));
+        Assert.That(summary, Does.Contain("so the licence could not be reclaimed"),
+            "The headline used to stop at 160 characters with \"...\", hiding what went wrong.");
+        Assert.That(summary, Does.Not.Contain(" ..."));
         Assert.That(summary, Does.Not.Contain("\n"), "A grid row is one line tall.");
+        Assert.That(summary, Does.Not.Contain("Handler.Invoke"), "The stack trace stays in the expanded row.");
     }
 
     [Test]

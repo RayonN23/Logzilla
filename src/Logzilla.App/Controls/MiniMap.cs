@@ -28,6 +28,10 @@ internal sealed class MiniMap : Control
         Width = Dpi.S(Theme.MinimapWidth);
         BackColor = Theme.BgData;
         Cursor = Cursors.Hand;
+        // A mouse-only strip: it has nothing to do with the keyboard, so it must not take
+        // focus away from the grid beside it.
+        TabStop = false;
+        SetStyle(ControlStyles.Selectable, false);
     }
 
     protected override void OnMouseDown(MouseEventArgs e)
@@ -83,6 +87,7 @@ internal sealed class MiniMap : Control
                 g.FillRectangle(br, Dpi.S(2), y, Math.Max(1, wdt), tick);
             }
         }
+        DrawHits(g, w, h);
         if (View != null && Res.View.Count > 0)
         {
             var f0 = (float)View.TopRow / Res.View.Count;
@@ -114,6 +119,38 @@ internal sealed class MiniMap : Control
                     g.FillRectangle(b, 0, Math.Clamp(y, 0, h - 2), w, 2);
                 }
             }
+        }
+    }
+
+    /// <summary>
+    /// Search hits as ticks down the right edge, apart from the severity bars on the
+    /// left, so a handful of matches in a long log can be seen and clicked to at a
+    /// glance — the way errors already are.
+    /// </summary>
+    private void DrawHits(Graphics g, int w, int h)
+    {
+        var hits = Res.HitSlots;
+        if (hits == null)
+        {
+            return;
+        }
+        var tickW = Math.Max(2, Dpi.S(3));
+        var tickH = Math.Max(2, Dpi.S(2));
+        using var b = new SolidBrush(Theme.MatchText);
+        var lastY = int.MinValue;
+        for (var k = 0; k < hits.Length; k++)
+        {
+            if (!hits[k])
+            {
+                continue;
+            }
+            var y = Math.Clamp((int)((long)k * h / FilterResult.Slots), 0, h - tickH);
+            if (y == lastY)
+            {
+                continue;
+            }
+            lastY = y;
+            g.FillRectangle(b, w - tickW, y, tickW, tickH);
         }
     }
 

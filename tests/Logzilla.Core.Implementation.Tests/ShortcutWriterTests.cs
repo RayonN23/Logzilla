@@ -51,6 +51,14 @@ public class ShortcutWriterTests
 
         Assert.That(File.Exists(shortcutPath), Is.True);
         Assert.That(new FileInfo(shortcutPath).Length, Is.GreaterThan(0));
+
+        // Read back through the shell: a slot out of order in the COM declaration
+        // would put each value into the wrong field rather than fail outright.
+        dynamic shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell")!)!;
+        dynamic link = shell.CreateShortcut(shortcutPath);
+        Assert.That((string)link.TargetPath, Is.EqualTo(targetPath).IgnoreCase);
+        Assert.That((string)link.WorkingDirectory, Is.EqualTo(folder.DirectoryPath).IgnoreCase);
+        Assert.That((string)link.Description, Is.EqualTo("Test shortcut"));
     }
 
     [Test]

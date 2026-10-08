@@ -22,9 +22,9 @@ public static class XmlText
     /// <summary>Below this many tags, a stray "&lt;" in prose is the likelier reading.</summary>
     private const int MinTags = 3;
 
-    /// <summary>Formatting is for reading on screen; past this the payload is a data
-    /// dump, and walking it stops being worth the cost on a paint path.</summary>
-    private const int MaxLength = 200_000;
+    /// <summary>A safety stop for a runaway line, not a size any real payload reaches.
+    /// Callers format once and cache, so a large payload is still laid out in full.</summary>
+    private const int MaxLength = 2_000_000;
 
     private enum Kind { Open, Close, SelfClose, Standalone, Text }
 

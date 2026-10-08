@@ -283,6 +283,8 @@ cached per document and line count).
 | `MainForm.Input.cs` | Keyboard + drag-and-drop input handling |
 | `MainForm.Panels.cs` | `FillSide()` — populates the side panels (summary, sources, fields, patterns, entry, marks, colors; Ask refreshes itself) |
 | `MainForm.FieldFilters.cs` | `_fieldFilters`, the chip strip, opening the editor (`OpenFieldEditor`, Ctrl+Shift+F), the chip menu, and the grid's "Show only where… / Hide where…" menus |
+| `MainForm.Highlighting.cs` | The Highlighting tab (key `colors`): the add bar (`HighlightInput`, `.*`, `HighlightAdd`), a right-click menu per rule, `RemoveOldDefaultRules` (one-off removal of the three rules versions up to 3.0 added). Tab labels come from `SideLabel` — keys `marks`/`colors`/`ask` read Bookmarks/Highlighting/AI Chat |
+| `MainForm.Tabs.cs` | Per-tab search: `SwitchTab(index)` saves the current tab's query, severity chips, sources, time range and field filters and restores the new tab's (`TabSearch`). Every change of active tab goes through it. Search options (regex, case, highlight/filter, context) stay window-wide |
 | `MainForm.TimeZones.cs` | The Log time / Local time / UTC chip and menu, asking a file's zone (`AskZone`, a `TaskDialog`), `DeclareZone`, per-path zone memory in settings (`zone.<PATH>`) |
 | `MainForm.Assistant.cs` | The Ask tab (8th side tab, Ctrl+8): provider/model picker, `Ask()` (redact → record → `IAssistantChat.SendAsync`, events marshalled with `BeginInvokeSafe`), citations → `_view.Select`, Apply → user filters, AI settings dialog, `AIPolicy`. Each question swaps an immutable `AskSnapshot` into `SwitchableContext`, so tools on background threads never read UI state |
 

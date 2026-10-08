@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Text;
 using Logzilla.Core.Common;
@@ -216,16 +217,31 @@ internal sealed class LogIndexer : ILogIndexer
             if (n >= 2 && head[0] == 0xFE && head[1] == 0xFF) { f.Encoding = Encoding.BigEndianUnicode; f.Stride = 2; f.DataStart = 2; return; }
             try
             {
+                // Only a character the probe cut in half may go unchecked, and only when
+                // the file carries on past the probe. Trimming four bytes unconditionally
+                // let a small file's last accented character pass as UTF-8.
                 var strict = new UTF8Encoding(false, true);
-                strict.GetString(head, 0, Math.Max(0, n - 4));
+                strict.GetDecoder().GetCharCount(head, 0, n, flush: fs.Length <= n);
                 f.Encoding = new UTF8Encoding(false);
             }
             catch (DecoderFallbackException ex)
             {
                 Debug.WriteLine("Fallback to system encoding: " + ex.Message);
-                f.Encoding = Encoding.Default;
+                f.Encoding = AnsiEncoding();
             }
         }
+    }
+
+    /// <summary>
+    /// The machine's ANSI code page (Windows-1252 on most Western systems), for a file
+    /// that is not valid UTF-8. Encoding.Default is no help: on .NET Core it is always
+    /// UTF-8, so the "fallback" decoded the same bytes the same way and every accented
+    /// character in such a file came out as a replacement mark.
+    /// </summary>
+    internal static Encoding AnsiEncoding()
+    {
+        var codePage = CultureInfo.CurrentCulture.TextInfo.ANSICodePage;
+        return CodePagesEncodingProvider.Instance.GetEncoding(codePage) ?? Encoding.Latin1;
     }
 
     // Reads from src.IndexedTo to the end of the file, appending lines to the document.

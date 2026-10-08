@@ -223,7 +223,7 @@ internal sealed class Timeline : Control
             }
         }
 
-        DrawViewport(g, w, baseY, chartTop);
+        DrawViewport(g, baseY, chartTop);
 
         if (!double.IsNaN(T0) && !double.IsNaN(Res.Lo) && Res.Hi > Res.Lo)
         {
@@ -248,7 +248,7 @@ internal sealed class Timeline : Control
             }
         }
 
-        DrawAxis(g, w, h, baseY);
+        DrawAxis(g, w, baseY);
 
         if (_curX >= 0 && !double.IsNaN(Res.Lo) && _dragX < 0)
         {
@@ -302,7 +302,7 @@ internal sealed class Timeline : Control
         }
     }
 
-    private void DrawViewport(Graphics g, int w, int baseY, int chartTop)
+    private void DrawViewport(Graphics g, int baseY, int chartTop)
     {
         if (View == null || File == null || Res == null || Res.View.Count == 0 || double.IsNaN(Res.Lo) || Res.Hi <= Res.Lo)
         {
@@ -345,7 +345,7 @@ internal sealed class Timeline : Control
         return full.Length >= 19 ? full.Substring(11, 8) : full;
     }
 
-    private void DrawAxis(Graphics g, int w, int h, int baseY)
+    private void DrawAxis(Graphics g, int w, int baseY)
     {
         if (Res == null || double.IsNaN(Res.Lo) || Res.Hi <= Res.Lo)
         {

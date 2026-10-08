@@ -28,6 +28,12 @@
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <!-- Runtime identifier and single-file packaging are supplied at publish time
          by build.ps1, so the project itself stays buildable on any machine. -->
+    <!-- Trimmed when published: the installer carries its own runtime, and an unsigned
+         download is uploaded and scanned whole before Windows lets it start, so every
+         megabyte cut is time the user is not left waiting. Shortcuts use
+         source-generated COM (hence unsafe blocks) because built-in COM cannot be trimmed. -->
+    <PublishTrimmed>true</PublishTrimmed>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <!--

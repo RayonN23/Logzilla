@@ -7,12 +7,20 @@ namespace Logzilla.App.Infrastructure;
 
 internal static class Paths
 {
+    /// <summary>Points settings, recent files and the AI record somewhere other than
+    /// %AppData%\Logzilla. The end-to-end tests set it so every run starts clean and
+    /// never touches the real user's settings; a portable copy can use it too.</summary>
+    public const string DataDirVariable = "LOGZILLA_DATA_DIR";
+
     public static string Dir
     {
         get
         {
-            var d = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Logzilla");
-            try { if (!Directory.Exists(d)) 
+            var over = Environment.GetEnvironmentVariable(DataDirVariable);
+            var d = !string.IsNullOrWhiteSpace(over)
+                ? over
+                : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Logzilla");
+            try { if (!Directory.Exists(d))
 {
     Directory.CreateDirectory(d);
 } }

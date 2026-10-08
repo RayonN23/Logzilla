@@ -152,7 +152,9 @@ internal sealed class PanelList : Control
     public sealed class ItemArgs : EventArgs
     {
         public PanelRow Item; public bool Ctrl;
-        public ItemArgs(PanelRow i, bool c) { Item = i; Ctrl = c; }
+        /// <summary>The right button: the row may offer a menu of its own.</summary>
+        public bool Right;
+        public ItemArgs(PanelRow i, bool c, bool right = false) { Item = i; Ctrl = c; Right = right; }
     }
 
     public PanelList()
@@ -214,7 +216,7 @@ internal sealed class PanelList : Control
         var idx = IndexAt(e.Y);
         if (idx >= 0 && idx < Items.Count && Activate != null)
         {
-            Activate(this, new ItemArgs(Items[idx], (ModifierKeys & Keys.Control) == Keys.Control));
+            Activate(this, new ItemArgs(Items[idx], (ModifierKeys & Keys.Control) == Keys.Control, e.Button == MouseButtons.Right));
         }
     }
 
@@ -375,10 +377,14 @@ internal sealed class PanelList : Control
         }
     }
 
+    /// <summary>
+    /// A row that leads somewhere: label, value, the row's unit and a chevron, with a bar
+    /// when the row has one. Written for the busiest error windows, it used to print
+    /// "errors" and cut the label at 96px whatever the row was — so the Sources panel's
+    /// time zone rows read "sample-servic … not stated errors".
+    /// </summary>
     private void DrawChevronRow(Graphics g, PanelRow it, int y, int w)
     {
-        TextRenderer.DrawText(g, it.Left, Theme.MonoBody, new Rectangle(LeftPad, y, Dpi.S(96), _row), Theme.Text3, Theme.TextFlags);
-
         var chevW = Dpi.S(12);
         var chevX = w - RightPad - chevW;
         using (var p = new Pen(Theme.TextDim, 1.3f))
@@ -389,11 +395,24 @@ internal sealed class PanelList : Control
 
         var countText = it.Right;
         var countW = TextRenderer.MeasureText(g, countText, Theme.MonoBody, new Size(short.MaxValue, short.MaxValue), Theme.TextFlags).Width;
-        var wordW = TextRenderer.MeasureText(g, "errors", Theme.UiBody, new Size(short.MaxValue, short.MaxValue), Theme.TextFlags).Width;
+        var unit = it.Unit ?? "";
+        var wordW = unit.Length == 0 ? 0 : TextRenderer.MeasureText(g, unit, Theme.UiBody, new Size(short.MaxValue, short.MaxValue), Theme.TextFlags).Width;
         var wordX = chevX - 6 - wordW;
-        var countX = wordX - 4 - countW;
+        var countX = wordX - (unit.Length == 0 ? 0 : 4) - countW;
         TextRenderer.DrawText(g, countText, Theme.MonoBody, new Rectangle(countX, y, countW + 2, _row), it.Accent, Theme.TextFlags);
-        TextRenderer.DrawText(g, "errors", Theme.UiBody, new Rectangle(wordX, y, wordW + 2, _row), Theme.TextDim, Theme.TextFlags);
+        if (unit.Length > 0)
+        {
+            TextRenderer.DrawText(g, unit, Theme.UiBody, new Rectangle(wordX, y, wordW + 2, _row), Theme.TextDim, Theme.TextFlags);
+        }
+
+        // With a bar the label keeps a fixed slot so the bars line up; without one it
+        // may run up to the value.
+        var labelW = it.Bar >= 0 ? Dpi.S(96) : Math.Max(Dpi.S(40), countX - Dpi.S(8) - LeftPad);
+        TextRenderer.DrawText(g, it.Left, Theme.MonoBody, new Rectangle(LeftPad, y, labelW, _row), Theme.Text3, Theme.TextFlagsEllipsis);
+        if (it.Bar < 0)
+        {
+            return;
+        }
 
         var barX = LeftPad + Dpi.S(100);
         var barW = Math.Max(20, countX - 8 - barX);

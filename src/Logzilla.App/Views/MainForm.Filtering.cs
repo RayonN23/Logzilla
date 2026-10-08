@@ -42,7 +42,7 @@ internal sealed partial class MainForm
         _st3.Text = "Scanning ...";
         var th = new Thread(delegate ()
         {
-            FilterResult r = null;
+            FilterResult r;
             try
             {
                 r = _filterEngine.Run(target, s, delegate { return _liveGen != gen; },
@@ -59,8 +59,25 @@ internal sealed partial class MainForm
             }
             catch (Exception ex)
             {
-                IgnoreNonCritical(ex, "Run filter");
-                r = null;
+                // Clear the "Scanning ..." state rather than leave it up for good, and
+                // say why nothing changed.
+                var why = ex is System.Text.RegularExpressions.RegexMatchTimeoutException
+                    ? "Search stopped: the regular expression took too long on one entry. Try a simpler pattern."
+                    : "Search failed: " + ex.Message;
+                try
+                {
+                    BeginInvoke((MethodInvoker)delegate
+                    {
+                        if (_liveGen != gen)
+                        {
+                            return;
+                        }
+                        _progPct = -1; _progHost.Invalidate();
+                        _st3.Text = why;
+                    });
+                }
+                catch (Exception inner) { IgnoreNonCritical(inner, "Report filter failure"); }
+                return;
             }
             if (r == null)
             {

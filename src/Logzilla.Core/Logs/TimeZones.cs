@@ -377,8 +377,11 @@ public sealed class ZoneClock
 
     private readonly TimeZoneInfo _zone;
     private readonly bool _fixed;
-    private double _wallKey = double.NaN, _wallOffset;
-    private double _instantKey = double.NaN, _instantOffset;
+    // Which quarter hour the cached offset is for, as a whole number so it compares exactly.
+    private long _wallKey = long.MinValue;
+    private double _wallOffset;
+    private long _instantKey = long.MinValue;
+    private double _instantOffset;
 
     public ZoneClock(TimeZoneInfo zone)
     {
@@ -394,7 +397,7 @@ public sealed class ZoneClock
         {
             return wallMs - _wallOffset;
         }
-        var key = Math.Floor(wallMs / Quarter);
+        var key = (long)Math.Floor(wallMs / Quarter);
         if (key != _wallKey)
         {
             _wallKey = key;
@@ -409,7 +412,7 @@ public sealed class ZoneClock
         {
             return instantMs + _instantOffset;
         }
-        var key = Math.Floor(instantMs / Quarter);
+        var key = (long)Math.Floor(instantMs / Quarter);
         if (key != _instantKey)
         {
             _instantKey = key;

@@ -4,89 +4,107 @@ using Logzilla.Core.Logs;
 
 namespace Logzilla.Core.Implementation.Logs;
 
+/// <summary>
+/// Random access to the raw bytes of a document's lines, read through a window per
+/// source file. A merged document interleaves its files line by line; with one shared
+/// window every change of file threw the other file's window away and re-read up to
+/// the whole buffer for a single line, which made searching two merged 50 MB logs take
+/// minutes instead of milliseconds.
+/// </summary>
 internal sealed class LineReader : ILineReader
 {
+    /// <summary>Smallest window worth keeping for one file, however many share the budget.</summary>
+    private const int MinWindow = 1 << 18;
+
     private readonly LogDocument _f;
+    private readonly Window[] _windows;
     private FileStream[] _fs;
-    private byte[] _buf;
-    private long _base = -1;
-    private int _len, _bufSrc = -1;
+
+    private sealed class Window
+    {
+        public byte[] Buf;
+        public long Base = -1;
+        public int Len;
+    }
 
     public LineReader(LogDocument f, int bufSize)
     {
         _f = f;
-        // No point holding more than the files could fill: every filter pass and every
-        // re-attached grid opens a reader, and most logs are far smaller than the
-        // megabytes asked for. Locate still grows the buffer for a line that needs it.
-        _buf = new byte[(int)Math.Clamp(f.Size + 16, 1024, Math.Max(1024, bufSize))];
-        _fs = new FileStream[f.Srcs.Count];
+        var count = Math.Max(1, f.Srcs.Count);
+        _fs = new FileStream[count];
+        _windows = new Window[count];
+        // The budget is shared between the files, and no file gets more than it could
+        // fill: every filter pass and every re-attached grid opens a reader, and most
+        // logs are far smaller than the megabytes asked for. Locate still grows a
+        // window for a line that needs it.
+        var share = Math.Max(MinWindow, bufSize / count);
+        for (var si = 0; si < count; si++)
+        {
+            var size = si < f.Srcs.Count ? f.Srcs[si].Size : f.Size;
+            _windows[si] = new Window { Buf = new byte[(int)Math.Clamp(size + 16, 1024, Math.Max(1024, share))] };
+        }
     }
 
     private FileStream Stream(int si)
     {
-        if (_fs[si] == null)
-        {
-            _fs[si] = new FileStream(_f.Srcs[si].Path, FileMode.Open, FileAccess.Read,
-                FileShare.ReadWrite | FileShare.Delete, 1 << 16, FileOptions.SequentialScan);
-        }
-        return _fs[si];
+        ObjectDisposedException.ThrowIf(_fs == null, this);
+        return _fs[si] ??= new FileStream(_f.Srcs[si].Path, FileMode.Open, FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete, 1 << 16, FileOptions.SequentialScan);
     }
 
-    // Places line i into the buffer and returns its offset there.
+    // Places line i into its file's window and returns its offset there.
     public int Locate(int i, out byte[] buf)
     {
         var start = _f.Off[i];
         var len = _f.Len[i];
         var si = _f.Src[i];
-        if (si == _bufSrc && _base >= 0 && start >= _base && start + len <= _base + _len)
+        var w = _windows[si];
+        if (w.Base >= 0 && start >= w.Base && start + len <= w.Base + w.Len)
         {
-            buf = _buf;
-            return (int)(start - _base);
+            buf = w.Buf;
+            return (int)(start - w.Base);
         }
-        if (len + 16 > _buf.Length)
+        if (len + 16 > w.Buf.Length)
         {
-            _buf = new byte[len + 1024];
+            w.Buf = new byte[len + 1024];
         }
         var fs = Stream(si);
         fs.Seek(start, SeekOrigin.Begin);
         var got = 0;
-        while (got < _buf.Length)
+        while (got < w.Buf.Length)
         {
-            var r = fs.Read(_buf, got, _buf.Length - got);
+            var r = fs.Read(w.Buf, got, w.Buf.Length - got);
             if (r <= 0)
             {
                 break;
             }
             got += r;
         }
-        _base = start;
-        _len = got;
-        _bufSrc = si;
-        buf = _buf;
+        w.Base = start;
+        w.Len = got;
+        buf = w.Buf;
         return 0;
     }
 
     public string Text(int i)
     {
-        byte[] b;
-        var o = Locate(i, out b);
-        return _f.Srcs[_f.Src[i]].Encoding.GetString(b, o, Math.Min(_f.Len[i], b.Length - o));
+        var o = Locate(i, out var b);
+        var w = _windows[_f.Src[i]];
+        // Bounded by what was actually read, not the window's size: a file cut short
+        // since it was indexed must not hand back the stale bytes of an earlier read.
+        var n = Math.Max(0, Math.Min(_f.Len[i], w.Len - o));
+        return _f.Srcs[_f.Src[i]].Encoding.GetString(b, o, n);
     }
 
     public void Dispose()
     {
-        GC.SuppressFinalize(this);
         if (_fs == null)
         {
             return;
         }
-        for (var i = 0; i < _fs.Length; i++)
+        foreach (var fs in _fs)
         {
-            if (_fs[i] != null)
-            {
-                _fs[i].Dispose();
-                _fs[i] = null;
-            }
+            fs?.Dispose();
         }
         _fs = null;
     }

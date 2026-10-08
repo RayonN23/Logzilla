@@ -435,9 +435,6 @@ internal static class JsonLog
     private static readonly string[] TemplateKeys = ["@mt", "MessageTemplate"];
     private static readonly SearchValues<char> NewLineChars = SearchValues.Create("\r\n");
 
-    /// <summary>How much of an exception a collapsed grid row shows before the "...".</summary>
-    private const int ExceptionPreviewChars = 160;
-
     // One-line summary for the log grid: flattened to a single line, with only the
     // head of any exception, because the row is one line tall.
     public static string Line(string raw)
@@ -475,13 +472,12 @@ internal static class JsonLog
     {
         var first = ex;
         var nl = first.AsSpan().IndexOfAny(NewLineChars);
+        // The whole first line of the exception: a one-line row has no room for the stack
+        // trace below it, but cutting the headline at 160 characters with "..." hid the
+        // part of the message that said what went wrong.
         if (nl > 0)
         {
             first = first.Substring(0, nl);
-        }
-        if (first.Length > ExceptionPreviewChars)
-        {
-            first = string.Concat(first.AsSpan(0, ExceptionPreviewChars), " ...");
         }
         return first;
     }

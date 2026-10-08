@@ -14,10 +14,12 @@
 A Windows desktop application for logs that are too big, too many, or too noisy
 to work through by hand. It opens multi-gigabyte logs in seconds, merges several
 of them onto one timeline, reads structured JSON logs as readable sentences
-instead of raw objects, and filters on any field the log records.
+instead of raw objects, filters on any field the log records, and — if you turn
+it on — answers questions about the log in plain words.
 
-It runs entirely on your own machine. Nothing is uploaded anywhere, which matters
-when logs carry customer device IDs, hostnames and internal addresses.
+It runs entirely on your own machine. Nothing is uploaded anywhere unless you
+turn on the AI assistant and ask it something, which matters when logs carry
+customer device IDs, hostnames and internal addresses.
 
 ---
 
@@ -128,21 +130,27 @@ a few dozen distinct things ranked by frequency. For CLEF logs the grouping is
 exact, because the log already carries the message template. The rare shapes sort
 to the bottom, and the rare shapes are usually the problem.
 
-**Selects, marks, copies and exports.** Drag down the rows, Shift+click, or hold
+**Selects, bookmarks, copies and exports.** Drag down the rows, Shift+click, or hold
 Shift with any movement key to select a run; <kbd>Ctrl</kbd>+<kbd>A</kbd> takes
 every entry shown. <kbd>Ctrl</kbd>+<kbd>C</kbd> copies the entries as they read on
-screen, one per line, with source labels in a merged view. <kbd>M</kbd> marks the
+screen, one per line, with source labels in a merged view. <kbd>M</kbd> bookmarks the
 selection so you can collect the lines that belong in a ticket and copy them all
-from the Marks panel later. <kbd>Ctrl</kbd>+<kbd>E</kbd> exports exactly the
+from the Bookmarks panel later. <kbd>Ctrl</kbd>+<kbd>E</kbd> exports exactly the
 filtered entries to a new file, preserving the original text.
 
 **Follows a live file.** **Live tail** keeps reading a log as it is written, like
 `tail -f`, with the index extended incrementally.
 
+**Answers questions about the log.** The **AI Chat** tab takes a question in plain
+words — *"what went wrong around 08:14?"* — and answers from the log itself,
+citing the lines it relied on. It works with GitHub Copilot, Claude or OpenAI, is
+off until you turn it on, and hides personal data before anything is sent. See
+[The AI assistant](#the-ai-assistant).
+
 ### The analysis panels
 
-Seven tabs in the inspector, each answering a question about the entries
-currently shown. <kbd>Ctrl</kbd>+<kbd>1</kbd>..<kbd>7</kbd> switch between them.
+Eight tabs in the inspector, each answering a question about the entries
+currently shown. <kbd>Ctrl</kbd>+<kbd>1</kbd>..<kbd>8</kbd> switch between them.
 
 | Panel | What it shows |
 |---|---|
@@ -150,16 +158,17 @@ currently shown. <kbd>Ctrl</kbd>+<kbd>1</kbd>..<kbd>7</kbd> switch between them.
 | **Detail** | The selected entry in full: timestamp, severity, byte offset, source, the rendered message, a property table, the exception, and the raw line. Embedded XML (plists, SOAP bodies) is indented |
 | **Fields** | Distinct values with counts — JSON property names, `key=value` pairs, IP addresses, `[bracketed tags]`. Click a value to filter to it, Ctrl+click to hide it |
 | **Patterns** | Entries grouped by shape, ranked by frequency, coloured by worst severity. Click to jump, Ctrl+click to filter |
-| **Marks** | Marked entries in order, ready to copy into a ticket or post-mortem |
+| **Bookmarks** | Bookmarked entries in order, ready to copy into a ticket or post-mortem |
 | **Sources** | Each file in a merged view with its share of entries; click to show or hide it |
-| **Colors** | Text or regex highlight rules, plus saving and loading a setup file (rules, query, levels and field filters) to share with a team |
+| **Highlighting** | Highlight any text or regex in a colour of its own: type it at the top of the tab and press Enter; right-click a highlight to recolour or remove it. Also saves and loads a setup file (highlights, query, levels and field filters) to share with a team |
+| **AI Chat** | The AI assistant: ask about the log in plain words, with answers that cite their lines |
 
 ### Getting around
 
 - **Timeline** — entry volume over time with warnings and errors stacked in
   colour; hover for exact counts.
 - **Minimap** — error density for the whole file, not just what is on screen,
-  with marks shown in amber. Click to jump.
+  with bookmarks shown in amber. Click to jump.
 - **Tabs** — one per open file, with its entry count and worst severity; merged
   views get their own tab.
 - **Long lines** — a horizontal scrollbar (and Shift+wheel) reaches anything past
@@ -169,6 +178,96 @@ currently shown. <kbd>Ctrl</kbd>+<kbd>1</kbd>..<kbd>7</kbd> switch between them.
   carry none.
 - **Date** chip — collapses the date-and-time column and gives its width to the
   message; a once-a-day band keeps the date visible.
+
+## The AI assistant
+
+### Using it
+
+1. Open **Tools › AI settings** and tick **Turn on the AI assistant**.
+2. Connect at least one provider:
+   - **GitHub Copilot** uses your existing Copilot subscription and offers every
+     model your plan and organisation allow. Click **Sign in with GitHub**: Logzilla
+     shows a short code, you approve it on github.com in your browser, and you're
+     done — your password never passes through Logzilla. Copilot also needs its
+     runtime: either a build made with `-BundleCopilot`, or the
+     [GitHub Copilot CLI](https://docs.github.com/copilot) installed. An existing
+     Copilot CLI sign-in, or a pasted fine-grained token, works too.
+   - **Claude** or **OpenAI** take an API key from your account with them. An
+     optional endpoint points either at your organisation's own gateway or at
+     Azure OpenAI.
+3. Open the **AI Chat** tab (<kbd>Ctrl</kbd>+<kbd>8</kbd>), pick a model from the list
+   at the top, and ask.
+
+The assistant reads the log through the same engine as the rest of the app: it
+searches, counts, reads entries around a line, groups entries into patterns and
+lists fields. A multi-gigabyte file never goes to the model, only the handful of
+results each question needs.
+
+- **Line numbers** in an answer, like `#4,211`, jump to that line when clicked.
+- **Apply** next to a search the assistant ran turns it into your own filters.
+- **Looking at** switches between the whole log and only what your filters show.
+- Right-click an entry › **Ask AI about this entry** asks for an explanation.
+- **••• › What was sent** shows exactly what left your computer in this session.
+- **Token usage** appears under every answer (tokens in and out, and model calls),
+  the conversation total sits at the top right of the tab, and **••• › Usage in
+  this conversation** adds cached tokens, GitHub Copilot premium requests and how
+  full the model's context window is. Counts are as each provider reports them.
+
+### Privacy and security
+
+- **Off by default.** Nothing is sent anywhere until the assistant is turned on
+  *and* you ask a question.
+- **Personal data is hidden.** Email and IP addresses, GUIDs, passwords, API keys,
+  tokens and connection-string secrets are replaced with placeholders such as
+  `«IP_1»` before anything is sent. The same value always gets the same
+  placeholder, so the model can still connect events, and the real values are put
+  back only on your screen.
+- **Read-only.** The model can call Logzilla's read-only log tools and nothing
+  else — it cannot write files, run commands or reach the web. For Copilot, whose
+  agent normally has a shell and file tools, the session is locked to Logzilla's
+  tools, every other permission is refused, and your own Copilot instructions,
+  skills and MCP servers are left out.
+- **Prompt injection.** Log lines are written partly by outsiders. The assistant
+  is told never to follow instructions found in the log, and even if it did,
+  it has nothing dangerous to do.
+- **Keys** are encrypted with Windows DPAPI for your account and are never written
+  to setup (`.cnx`) files.
+- **A record.** Optionally, everything sent is appended to a daily file in
+  `%APPDATA%\Logzilla\ai-record`.
+
+### For administrators
+
+Group Policy or Intune can control the assistant through values under
+`HKLM\SOFTWARE\Policies\Logzilla` (or `HKCU\...`, with the machine key winning).
+Logzilla installs per user and never writes there, so users cannot loosen it.
+
+| Value | Type | Effect |
+|---|---|---|
+| `AIDisabled` | DWORD `1` | No assistant at all |
+| `AIAllowedProviders` | String, e.g. `copilot,anthropic` | Only these providers are offered |
+| `AIRequireRedaction` | DWORD `1` | Personal data is always hidden |
+| `AIRequireRecord` | DWORD `1` | Everything sent is always recorded |
+| `AIAnthropicEndpoint` | String URL | The only Anthropic endpoint to use |
+| `AIOpenAIEndpoint` | String URL | The only OpenAI endpoint to use, e.g. Azure OpenAI |
+| `AIGitHubClientId` | String | Your organisation's own GitHub app for **Sign in with GitHub**, e.g. one your organisation has approved |
+
+### Setting up Sign in with GitHub (maintainers)
+
+Sign in with GitHub uses a GitHub app registered for Logzilla. Its Client ID is
+public — it names the app, it does not prove anything — so it is compiled in:
+
+1. On GitHub, go to **Settings › Developer settings** and create a **GitHub App**
+   (recommended) or an **OAuth App**. Any homepage and callback URL will do; the
+   device flow never uses the callback.
+2. Tick **Enable Device Flow**. For a GitHub App, give it no repository or
+   organisation permissions — Logzilla only needs to know who signed in.
+3. Copy the **Client ID** into `GitHubClientId` in `src/Logzilla.App/Logzilla.App.csproj`,
+   or pass `/p:GitHubClientId=...` to the build. Never add a client secret: a
+   desktop app cannot keep one, and the device flow does not need it.
+
+A GitHub App's user tokens expire after eight hours and Logzilla renews them
+automatically. If you turn expiring tokens off in the app's settings, or use an
+OAuth App, tokens last until the user signs out or revokes access on GitHub.
 
 ## Shortcuts
 
@@ -182,7 +281,7 @@ currently shown. <kbd>Ctrl</kbd>+<kbd>1</kbd>..<kbd>7</kbd> switch between them.
 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd> | Add a field filter |
 | <kbd>E</kbd> / <kbd>Shift</kbd>+<kbd>E</kbd> | Next / previous error or worse |
 | <kbd>W</kbd> | Show only warnings and above |
-| <kbd>M</kbd> | Mark or unmark the selected entries |
+| <kbd>M</kbd> | Bookmark the selected entries, or remove their bookmarks |
 | <kbd>B</kbd> / <kbd>Shift</kbd>+<kbd>B</kbd> | Next / previous marked entry |
 | <kbd>Ctrl</kbd>+<kbd>G</kbd> | Go to line number |
 | <kbd>Ctrl</kbd>+<kbd>R</kbd> | Reset query, levels, field filters and time range |
@@ -190,13 +289,13 @@ currently shown. <kbd>Ctrl</kbd>+<kbd>1</kbd>..<kbd>7</kbd> switch between them.
 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd> | Copy every entry shown |
 | <kbd>Ctrl</kbd>+<kbd>E</kbd> | Export the entries shown |
 | <kbd>Ctrl</kbd>+<kbd>W</kbd> / <kbd>Ctrl</kbd>+<kbd>Tab</kbd> | Close the current tab / cycle tabs |
-| <kbd>Ctrl</kbd>+<kbd>1</kbd>..<kbd>7</kbd> | Switch analysis panels |
+| <kbd>Ctrl</kbd>+<kbd>1</kbd>..<kbd>8</kbd> | Switch analysis panels (8 is Ask) |
 | <kbd>F5</kbd> / <kbd>F6</kbd> | Re-read from disk / follow the file |
 | <kbd>Ctrl</kbd>+<kbd>+</kbd> / <kbd>-</kbd> / <kbd>0</kbd> | Text size |
 | <kbd>F1</kbd> | Full shortcut list |
 
-Right-click a severity chip to isolate that level; double-click a word in the grid
-to add it to the Find box.
+Right-click a severity chip to isolate that level; right-click a word in the grid
+and choose **Find** to add it to the Find box.
 
 ## Accessibility
 
@@ -216,7 +315,10 @@ to add it to the Find box.
 | Installed to | `%LOCALAPPDATA%\Programs\Logzilla` |
 | Settings, window size and recent files | `%APPDATA%\Logzilla` |
 | Force a UI scale | `set LOGZILLA_SCALE=1.5` before launching |
-| Colour rules, query and filters | **Tools → Save setup** writes a `.cnx` file to share |
+| Highlights, query and filters | **Tools → Save setup** writes a `.cnx` file to share |
+| AI settings | **Tools › AI settings**; keys are encrypted in `settings.ini` |
+| Record of what the AI was sent | `%APPDATA%\Logzilla\ai-record` (when turned on) |
+| AI policy for organisations | `HKLM\SOFTWARE\Policies\Logzilla` — see [For administrators](#for-administrators) |
 
 ## Limits
 
@@ -247,9 +349,12 @@ dotnet test  Logzilla.sln              # run the unit tests
 `build.ps1` writes `dist\Logzilla-Setup.exe`. It publishes self-contained and
 ReadyToRun by default so the target machine needs no .NET runtime; add
 `-FrameworkDependent` for a far smaller build when the runtime is already there,
-or `-Runtime win-arm64` to target Arm.
+`-Runtime win-arm64` to target Arm, or `-BundleCopilot` to carry the GitHub
+Copilot runtime inside the app (about 200 MB) so Copilot works without the Copilot
+CLI installed. Without it, the installer stays small and Copilot uses the CLI the
+user installed.
 
-Pushing a tag such as `v2.1.0` makes CI build the installer and attach it to a
+Pushing a tag such as `v3.0.0` makes CI build the installer and attach it to a
 GitHub Release. See [CHANGELOG.md](CHANGELOG.md) for what changed in each version.
 
 ### How the installer works
@@ -268,7 +373,7 @@ framework; the Windows-only parts are marked `[SupportedOSPlatform("windows")]`.
 
 ## How the code is laid out
 
-Three engine assemblies plus the front end. The split follows the layering
+Three engine assemblies, the AI assistant and the front end. The split follows the layering
 rule: **models and interfaces live in `Core`; concrete classes live in
 `Core.Implementation` and are all `internal`**. The only public type in the
 implementation is `CoreServices`, the composition root that hosts call.
@@ -287,16 +392,24 @@ src/
     Formats/    TsParser, LevelScan, JsonLog, JsonLogReader
     Logs/       LogIndexer, LineReader, SourceLabels
     Query/      FilterEngine
+  Logzilla.AI/                    the AI assistant; the only project with AI packages
+    Tools/      LogTools (the read-only tools a model may call), Shapes,
+                ILogContext (what the host lets the tools see)
+    Privacy/    Redactor
+    Providers/  IAssistantProvider, CopilotProvider (GitHub Copilot SDK),
+                ChatClientProvider → AnthropicProvider, OpenAIProvider
   Logzilla.App/                   Windows Forms front end
     Controls/   log grid, timeline, minimap, tab strip, scrollbar,
-                field filter chips and editor
-    Dialogs/    field filter dialog, prompts
+                field filter chips and editor, Ask panel and transcript
+    Dialogs/    field filter dialog, AI settings, prompts
     Infrastructure/ theme, DPI scaling, settings, file associations,
-                field catalog, clipboard composition
+                field catalog, clipboard composition, AI policy,
+                encrypted secrets, AI record, answer markup
     Views/      MainForm, split into partial classes
   Logzilla.Setup/                 the installer, built by the .NET SDK
 tests/
   Logzilla.Core.Implementation.Tests/   NUnit tests for the engine
+  Logzilla.AI.Tests/                    NUnit tests for the tools, redaction and providers
   Logzilla.App.Tests/                   NUnit tests for the UI's non-pixel logic
 ```
 
@@ -334,6 +447,13 @@ size it with `Dpi.S()` and let the layout panels wrap.
 **Merging is a k-way merge, not a sort.** Each file is already in time order, so
 `LogIndexer.Merge` walks cursors and copies whole entry groups, which keeps stack
 traces bonded to their parent line.
+
+**A model only ever sees the log through `LogTools`.** Every tool is read-only,
+caps its output and runs it through the `Redactor` before it is returned. Don't
+give the assistant a tool that writes, runs anything or reaches the network: log
+content is partly written by outsiders, and a read-only tool set is what makes
+prompt injection harmless. Each question reads a snapshot of the view taken when
+it was asked, so tool calls on background threads never touch the UI.
 
 ## License
 
