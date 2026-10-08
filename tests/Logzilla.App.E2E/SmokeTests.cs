@@ -97,6 +97,49 @@ public sealed class SmokeTests
     }
 
     [Test]
+    public void EachTabKeepsItsOwnSearch()
+    {
+        // The team's report: a search typed on one log followed you to every other tab.
+        using var app = LogzillaApp.Start(Plain, "gateway-access.log");
+        app.WaitForResults();
+        System.Threading.Thread.Sleep(1000);   // the other file finishes indexing too
+        app.SetText("SearchBox", "nginx");
+        app.WaitForResults();
+        var searched = app.ResultCount;
+
+        app.Window.SetForeground();
+        app.Find("LogGrid").Focus();
+        app.Chord(VirtualKeyShort.CONTROL, VirtualKeyShort.TAB);
+        app.WaitUntil(() => app.Text("SearchBox").Length == 0, "the other tab shows its own, empty search");
+        app.WaitUntil(() => app.ResultCount == 30136, "the other log is unfiltered");
+
+        app.Find("LogGrid").Focus();
+        app.Chord(VirtualKeyShort.CONTROL, VirtualKeyShort.TAB);
+        app.WaitUntil(() => app.Text("SearchBox") == "nginx", "the first tab's search comes back");
+        app.WaitUntil(() => app.ResultCount == searched, "with the same results");
+        app.Screenshot("back");
+    }
+
+    [Test]
+    public void AHighlightCanBeAddedRightOnTheHighlightingTab()
+    {
+        using var app = LogzillaApp.Start(Plain);
+        app.WaitForResults();
+
+        Assert.That(app.Find("SideTab.colors").Name, Is.EqualTo("Highlighting"));
+        Assert.That(app.Find("SideTab.marks").Name, Is.EqualTo("Bookmarks"));
+        Assert.That(app.Find("SideTab.ask").Name, Is.EqualTo("AI Chat"));
+
+        app.Press("SideTab.colors");
+        app.WaitUntil(() => !app.Find("HighlightInput").IsOffscreen, "the highlight bar shows");
+        app.SetText("HighlightInput", "Slow query");
+        app.Press("HighlightAdd");
+
+        app.WaitUntil(() => app.Text("HighlightInput").Length == 0, "the bar clears once the rule is added");
+        app.Screenshot("added");
+    }
+
+    [Test]
     public void TypingInTheAskBoxDoesNotTriggerGridShortcuts()
     {
         // A connected provider, so the question box is enabled. The key is a dummy and

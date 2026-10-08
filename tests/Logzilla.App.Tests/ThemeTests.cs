@@ -38,11 +38,10 @@ public sealed class ThemeTests
     [TestCase(nameof(Theme.FilterBarHeight), 44)]
     [TestCase(nameof(Theme.TimelineHeight), 96)]
     [TestCase(nameof(Theme.StatusBarHeight), 28)]
-    [TestCase(nameof(Theme.InspectorWidth), 380)]
+    [TestCase(nameof(Theme.InspectorWidth), 440)]
     [TestCase(nameof(Theme.RowHeight), 20)]
     [TestCase(nameof(Theme.ColGutter), 46)]
     [TestCase(nameof(Theme.ColSpine), 3)]
-    [TestCase(nameof(Theme.ColTime), 100)]
     [TestCase(nameof(Theme.ColLevel), 46)]
     [TestCase(nameof(Theme.MinimapWidth), 11)]
     public void LayoutMetricMatchesTheBrief(string metricName, int expected)

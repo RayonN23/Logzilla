@@ -79,6 +79,19 @@ internal sealed class ThinScrollBar : Control
 
     private bool Active { get { return Enabled && MaxValue > 0 && Track > MinThumb; } }
 
+    protected override AccessibleObject CreateAccessibilityInstance() => new BarAccessible(this);
+
+    /// <summary>Reports whether the bar is showing a thumb and where it is, as
+    /// "position of furthest" — or "none" when there is nothing to scroll, which is when
+    /// the bar paints as an empty track.</summary>
+    private sealed class BarAccessible(ThinScrollBar owner) : ControlAccessibleObject(owner)
+    {
+        public override string Value => owner.Active
+            ? owner.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) + " of " +
+              owner.MaxValue.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            : "none";
+    }
+
     private int ThumbLen()
     {
         var total = _max + 1;

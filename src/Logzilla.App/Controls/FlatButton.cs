@@ -58,6 +58,22 @@ internal sealed class FlatButton : Control
     protected override void OnGotFocus(EventArgs e) { base.OnGotFocus(e); Invalidate(); }
     protected override void OnLostFocus(EventArgs e) { base.OnLostFocus(e); Invalidate(); }
 
+    protected override AccessibleObject CreateAccessibilityInstance() => new ButtonAccessible(this);
+
+    /// <summary>Lets screen readers and UI automation press the button and see whether a
+    /// tab is the selected one; a plain Control answers neither.</summary>
+    private sealed class ButtonAccessible(FlatButton owner) : ControlAccessibleObject(owner)
+    {
+        public override string Name => owner.AccessibleName ?? owner.Text;
+
+        public override string DefaultAction => "Press";
+
+        public override AccessibleStates State =>
+            base.State | (owner._selected ? AccessibleStates.Selected | AccessibleStates.Checked : AccessibleStates.None);
+
+        public override void DoDefaultAction() => owner.OnClick(EventArgs.Empty);
+    }
+
     protected override bool IsInputKey(Keys keyData) => keyData is Keys.Enter or Keys.Space || base.IsInputKey(keyData);
 
     protected override void OnKeyDown(KeyEventArgs e)

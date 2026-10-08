@@ -10,6 +10,7 @@ using Logzilla.App.Controls;
 using Logzilla.App.Dialogs;
 using Logzilla.App.Infrastructure;
 using Logzilla.Core.Common;
+using Logzilla.Core.Query;
 
 namespace Logzilla.App.Views;
 
@@ -134,12 +135,20 @@ internal sealed partial class MainForm
         {
             return;
         }
-        var text = _view.TextOf(_view.Selected);
-        var word = WordAt(text, e.X);
+        // The word or field value under the pointer as the grid drew it — not a column
+        // of the raw line, which for a JSON record is not what is on screen at all.
+        var word = _view.PickAt(e.Location, out var fieldKey);
 
         var cm = new ContextMenuStrip();
         cm.Renderer = new ToolStripProfessionalRenderer(new DarkColors());
         cm.BackColor = Theme.BgChrome; cm.ForeColor = Theme.Text; cm.Font = Theme.UiBody;
+        if (word.Length > 0)
+        {
+            var what = fieldKey == null ? "\"" + Trim(word) + "\"" : FieldNames.Display(fieldKey) + "  " + Trim(word);
+            var picked = word;
+            var label = fieldKey == null ? "text" : FieldNames.Display(fieldKey);
+            cm.Items.Add(Mi("Copy " + what, Keys.None, delegate { CopyText(picked, label); }));
+        }
         cm.Items.Add(Mi(CopyLabel(), Keys.None, delegate { CopySelected(); }));
         cm.Items.Add(Mi("Copy all shown entries", Keys.None, delegate { CopyShown(); }));
         if (word.Length > 0)
@@ -155,7 +164,11 @@ internal sealed partial class MainForm
             }));
         }
         cm.Items.Add(new ToolStripSeparator());
+        AddFollowThread(cm, _view.Selected);
         AddFieldMenus(cm, _view.Selected);
+        cm.Items.Add(new ToolStripSeparator());
+        var entry = _view.Selected;
+        cm.Items.Add(Mi("Ask AI about this entry", Keys.None, delegate { AskAboutEntry(entry); }));
         cm.Items.Add(new ToolStripSeparator());
         cm.Items.Add(Mi(MarkLabel(), Keys.None, delegate { ToggleMark(); }));
         cm.Items.Add(Mi("Jump to next error  (E)", Keys.None, delegate { JumpSeverity(1, 5); }));
@@ -193,35 +206,40 @@ internal sealed partial class MainForm
 
     private static string Trim(string s) => s.Length > 24 ? string.Concat(s.AsSpan(0, 24), "...") : s;
 
-    private string WordAt(string text, int mouseX)
+    /// <summary>Puts one value on the clipboard and says what was copied.</summary>
+    private void CopyText(string text, string what)
     {
-        if (F != null && !_view.Raw && _view.Selected >= 0)
+        if (string.IsNullOrEmpty(text))
         {
-            int sk = F.Skip[_view.Selected];
-            if (sk > 0 && sk < text.Length)
-            {
-                text = text.Substring(sk);
-            }
+            return;
         }
-        var col = _view.ColumnAt(mouseX);
-        if (col < 0 || col >= text.Length)
+        try
         {
-            return "";
+            Clipboard.SetText(text);
+            _st3.Text = "Copied " + what + ": " + Trim(text);
         }
-        int a = col, b = col;
-        while (a > 0 && IsWordChar(text[a - 1]))
-        {
-            a--;
-        }
-        while (b < text.Length && IsWordChar(text[b]))
-        {
-            b++;
-        }
-        return b > a ? text.Substring(a, b - a) : "";
+        catch (Exception ex) { IgnoreNonCritical(ex, "Copy " + what); }
     }
 
-    private static bool IsWordChar(char c)
-    { return char.IsLetterOrDigit(c) || c == '_' || c == '.' || c == '-' || c == ':' || c == '/' || c == '='; }
+    /// <summary>
+    /// "Follow thread 7": shows only the entries the same thread wrote, in order — what
+    /// that thread did next, which interleaved threads otherwise bury. Offered when the
+    /// entry names its thread (ThreadId, thread, tid …).
+    /// </summary>
+    private void AddFollowThread(ContextMenuStrip cm, int line)
+    {
+        foreach (var (key, value) in _view.FieldsOf(line, 24))
+        {
+            if (!FieldNames.IsThread(key))
+            {
+                continue;
+            }
+            var k = key;
+            var v = value;
+            cm.Items.Add(Mi("Follow thread " + Trim(v), Keys.None, delegate { AddFieldFilter(k, FieldOp.Is, v); }));
+            return;
+        }
+    }
 
     private void DoExport()
     {
@@ -539,7 +557,7 @@ internal sealed partial class MainForm
         var f = F;
         if (f == null || f.Marks.Count == 0)
         {
-            _st3.Text = "no marks  —  press M on an entry to set one";
+            _st3.Text = "no bookmarks  —  press M on an entry to add one";
             return;
         }
         if (_res == null)
@@ -560,7 +578,7 @@ internal sealed partial class MainForm
         }
         if (visible.Count == 0)
         {
-            _st3.Text = "marks not visible  —  Ctrl+R to reset filters";
+            _st3.Text = "bookmarks not visible  —  Ctrl+R to reset filters";
             return;
         }
 
@@ -591,7 +609,7 @@ internal sealed partial class MainForm
         }
 
         _view.Select(visible[idx], true);
-        _st3.Text = "mark " + (idx + 1) + " of " + visible.Count + (wrapped ? "  (wrapped)" : "");
+        _st3.Text = "bookmark " + (idx + 1) + " of " + visible.Count + (wrapped ? "  (wrapped)" : "");
     }
 
     private void JumpSeverity(int dir, int min)
@@ -635,8 +653,13 @@ internal sealed partial class MainForm
     /// </summary>
     private void CopySelected()
     {
-        // The menu owns Ctrl+C, so the form sees it first; the search box keeps its own.
-        if (_q.Focused) { _q.Copy(); return; }
+        // The menu owns Ctrl+C, so the form sees it first. A box being typed in keeps
+        // its own, and so does a read-only one (the Entry panel) with text picked out.
+        if (FocusedTextBox() is { } box && (!box.ReadOnly || box.SelectionLength > 0))
+        {
+            box.Copy();
+            return;
+        }
         CopyEntries(_view.SelectedLines(), raw: false, "copied");
     }
 
@@ -667,14 +690,14 @@ internal sealed partial class MainForm
         var lines = _view.SelectedLines();
         if (f == null || lines.Count == 0)
         {
-            return "Mark this entry  (M)";
+            return "Bookmark this entry  (M)";
         }
         var marking = lines.Exists(i => !f.Marks.Contains(i));
         if (lines.Count == 1)
         {
-            return marking ? "Mark this entry  (M)" : "Remove mark  (M)";
+            return marking ? "Bookmark this entry  (M)" : "Remove bookmark  (M)";
         }
-        return (marking ? "Mark " : "Unmark ") + DisplayFormatter.Number(lines.Count) + " entries  (M)";
+        return (marking ? "Bookmark " : "Remove the bookmarks from ") + DisplayFormatter.Number(lines.Count) + " entries  (M)";
     }
 
     /// <summary>Reads the given entries and puts them on the clipboard; see
@@ -759,7 +782,7 @@ internal sealed partial class MainForm
                 sb.AppendLine(feed.Text(i));
             }
         }
-        try { Clipboard.SetText(sb.ToString()); _st3.Text = "Copied " + ms.Count + " marked entries"; }
+        try { Clipboard.SetText(sb.ToString()); _st3.Text = "Copied " + ms.Count + " bookmarked entries"; }
         catch (Exception ex) { IgnoreNonCritical(ex, "Copy marked entries"); }
     }
 
@@ -773,8 +796,8 @@ internal sealed partial class MainForm
             "  Ctrl+F  or  /    Focus the Find box\r\n" +
             "  Enter / Shift+Enter, F3    Next / previous match\r\n" +
             "  E / Shift+E      Next / previous error or worse\r\n" +
-            "  M                Mark or unmark the selected entries\r\n" +
-            "  B / Shift+B      Next / previous marked entry\r\n" +
+            "  M                Bookmark the selected entries, or remove the bookmark\r\n" +
+            "  B / Shift+B      Next / previous bookmarked entry\r\n" +
             "  Ctrl+G           Go to line number\r\n" +
             "  Ctrl+R           Reset filters\r\n" +
             "  Ctrl+A           Select every entry shown\r\n" +
@@ -805,13 +828,22 @@ internal sealed partial class MainForm
             "  Works on JSON keys and on key=value pairs in plain-text logs,\r\n" +
             "  stack traces included.\r\n\r\n" +
             "DRILL DOWN\r\n" +
-            "  Right-click an entry for find, hide, highlight and mark.\r\n" +
+            "  Right-click an entry for find, hide, highlight and bookmark.\r\n" +
             "  Double-click a word to add it to the Find box.\r\n" +
             "  Click a value under Fields to filter on it (Ctrl+click hides it instead),\r\n" +
             "  or Ctrl+click a shape under Patterns.\r\n" +
             "  Drag across the timeline, or type in the TIME box (e.g. 20:00 - 21:00,\r\n" +
             "  8pm - 9pm, 8:30am - 5:30pm, 2026-01-15 08:00 - 09:30) to set a range.\r\n" +
             "  Right-click a severity button to isolate that level.\r\n\r\n" +
+            "AI ASSISTANT\r\n" +
+            "  Ctrl+8, or View > AI Chat, opens the AI Chat tab. Turn it on and\r\n" +
+            "  connect GitHub Copilot, Claude or OpenAI in Tools > AI settings. It is off\r\n" +
+            "  until you turn it on, and nothing is sent until you ask.\r\n" +
+            "  Answers cite lines like #1234; click one to jump to it. Apply turns a\r\n" +
+            "  search the assistant ran into your own filters.\r\n" +
+            "  Right-click an entry > Ask AI about this entry.\r\n" +
+            "  Personal data is hidden before sending. ••• > What was sent shows\r\n" +
+            "  exactly what left this computer; ••• > Usage shows the tokens used.\r\n\r\n" +
             "TIME ZONES\r\n" +
             "  The Log time / Local time / UTC chip (View > Show times) picks the\r\n" +
             "  clock times are shown in. Log time is exactly what the file wrote.\r\n" +

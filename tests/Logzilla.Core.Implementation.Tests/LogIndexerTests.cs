@@ -186,6 +186,51 @@ public class LogIndexerTests
     }
 
     [Test]
+    public void EveryLineOfAMergedViewReadsBackFromItsOwnFile()
+    {
+        // Lines alternate between the two files, so each read switches file. Each file
+        // keeps its own window: the reader must hand back the right bytes either way.
+        var indexer = NewIndexer();
+        var a = new StringBuilder();
+        var b = new StringBuilder();
+        for (var i = 0; i < 2000; i++)
+        {
+            a.Append("2026-03-01 08:00:").Append((i / 100).ToString("00", System.Globalization.CultureInfo.InvariantCulture))
+             .Append('.').Append((i % 100 * 10).ToString("000", System.Globalization.CultureInfo.InvariantCulture)).Append(" INFO  a line ").Append(i).Append('\n');
+            b.Append("2026-03-01 08:00:").Append((i / 100).ToString("00", System.Globalization.CultureInfo.InvariantCulture))
+             .Append('.').Append((i % 100 * 10 + 5).ToString("000", System.Globalization.CultureInfo.InvariantCulture)).Append(" INFO  b line ").Append(i).Append('\n');
+        }
+        var merged = indexer.Merge([Load(indexer, WriteLog("a.log", a.ToString())), Load(indexer, WriteLog("b.log", b.ToString()))]);
+
+        // A small budget, so the windows also have to move along their files.
+        using var reader = indexer.OpenReader(merged, 4096);
+
+        Assert.That(merged.N, Is.EqualTo(4000));
+        for (var i = 0; i < merged.N; i++)
+        {
+            var file = merged.Src[i] == 0 ? "a" : "b";
+            Assert.That(reader.Text(i), Does.Contain(" " + file + " line " + (i / 2)), "line " + i);
+        }
+    }
+
+    [Test]
+    public void AFileThatIsNotUtf8IsReadInTheAnsiCodePage()
+    {
+        // "café" in Windows-1252: é is the single byte E9, which is not valid UTF-8.
+        var path = Path.Combine(_directory, "ansi.log");
+        var bytes = new byte[] { (byte)'c', (byte)'a', (byte)'f', 0xE9, (byte)'\n' };
+        File.WriteAllBytes(path, bytes);
+        var indexer = NewIndexer();
+        var document = Load(indexer, path);
+
+        using var reader = indexer.OpenReader(document, 1 << 16);
+
+        Assert.That(document.Srcs[0].Encoding.CodePage, Is.Not.EqualTo(65001), "Not decoded as UTF-8.");
+        Assert.That(reader.Text(0), Is.EqualTo(LogIndexer.AnsiEncoding().GetString(bytes, 0, 4)));
+        Assert.That(reader.Text(0), Does.Not.Contain("�"), "No replacement characters.");
+    }
+
+    [Test]
     public void MergeRejectsAnEmptyList()
     {
         Assert.Throws<ArgumentException>(() => NewIndexer().Merge([]));

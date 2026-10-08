@@ -83,7 +83,7 @@ internal sealed partial class MainForm : Form
         {
             if (!_docs[i].Merged && _docs[i].Srcs.Count == 1 &&
                 string.Equals(_docs[i].Srcs[0].Path, path, StringComparison.OrdinalIgnoreCase))
-            { _active = i; SyncTabs(); StartFilter(); return; }
+            { SwitchTab(i); SyncTabs(); StartFilter(); return; }
         }
 
         LogSource src;
@@ -105,15 +105,18 @@ internal sealed partial class MainForm : Form
         doc.Srcs.Add(src);
 
         _docs.Add(doc);
-        _active = _docs.Count - 1;
-        _srcMask = -1;
+        SwitchTab(_docs.Count - 1);
         SyncTabs();
         Settings.PushRecent(path);
 
         _st3.Text = "Indexing " + src.Name + " ...";
         _progPct = 0; _progHost.Invalidate();
 
-        var gen = ++_gen;
+        // Cancelled only when this file's tab is closed: opening another file must not
+        // stop this one part-way.
+        var cancel = new CancellationTokenSource();
+        var token = cancel.Token;
+        _indexing[doc] = cancel;
         var th = new Thread(delegate ()
         {
             try
@@ -137,7 +140,7 @@ internal sealed partial class MainForm : Form
                             catch (Exception ex) { IgnoreNonCritical(ex, "Refresh indexing progress"); }
                         }
                     },
-                    delegate { return _gen != gen; });
+                    delegate { return token.IsCancellationRequested; });
             }
             catch (Exception ex)
             {
@@ -148,9 +151,17 @@ internal sealed partial class MainForm : Form
             {
                 BeginInvoke((MethodInvoker)delegate
                 {
-                    _progPct = -1; _progHost.Invalidate(); _st3.Text = "";
+                    _indexing.Remove(doc);
+                    cancel.Dispose();
+                    if (_indexing.Count == 0)
+                    {
+                        _progPct = -1; _progHost.Invalidate(); _st3.Text = "";
+                    }
                     SyncTabs();
-                    StartFilter();
+                    if (!token.IsCancellationRequested)
+                    {
+                        StartFilter();
+                    }
                 });
             }
             catch (Exception ex) { IgnoreNonCritical(ex, "Finalize indexing UI"); }
@@ -210,9 +221,7 @@ internal sealed partial class MainForm : Form
         {
             var m = _indexer.Merge(parts);
             _docs.Add(m);
-            _active = _docs.Count - 1;
-            _srcMask = -1;
-            _view.ClearSelection();
+            SwitchTab(_docs.Count - 1);
             SyncTabs();
             _sideTab = "sources"; SyncSideTabs();
             StartFilter();
@@ -229,13 +238,24 @@ internal sealed partial class MainForm : Form
             return;
         }
         _worstSev.Remove(_docs[i]);
-        _docs.RemoveAt(i);
-        if (_active >= _docs.Count)
+        if (_indexing.TryGetValue(_docs[i], out var indexing))
         {
-            _active = _docs.Count - 1;
+            indexing.Cancel();
         }
-        _view.ClearSelection();
-        _srcMask = -1;
+        var closing = _docs[i];
+        var wasActive = i == _active;
+        _docs.RemoveAt(i);
+        ForgetTabSearch(closing);
+        if (wasActive || _docs.Count == 0)
+        {
+            // The tab in front went: the one that takes its place brings its own search.
+            SwitchTab(_docs.Count == 0 ? -1 : System.Math.Min(i, _docs.Count - 1));
+        }
+        else if (i < _active)
+        {
+            // A tab to the left closed: the one in front stays in front.
+            _active--;
+        }
         SyncTabs();
         if (_docs.Count == 0)
         {
@@ -269,7 +289,7 @@ internal sealed partial class MainForm : Form
     private void TailPoll()
     {
         var f = F;
-        if (f == null || f.Merged || _progPct >= 0)
+        if (f == null || f.Merged || _indexing.ContainsKey(f))
         {
             return;
         }

@@ -23,4 +23,10 @@ public sealed class FilterResult
 
     /// <summary>Severity density for the whole document, one byte per minimap slot.</summary>
     public byte[] Density { get; set; }
+
+    /// <summary>
+    /// Which minimap slots hold a search hit, on the same scale as <see cref="Density"/>.
+    /// Null when there is nothing to show: no search, or every row on view is a hit.
+    /// </summary>
+    public bool[] HitSlots { get; set; }
 }

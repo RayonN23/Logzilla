@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.Marshalling;
 using System.Runtime.Versioning;
 using System.Text;
 
@@ -13,7 +14,7 @@ namespace Logzilla.Setup;
 /// than late-bound through WScript.Shell so mistakes are caught at compile time.
 /// </summary>
 [SupportedOSPlatform("windows")]
-public static class ShortcutWriter
+public static partial class ShortcutWriter
 {
     private const int ErrorBadFormat = unchecked((int)0x8007000B);
     private const string PowerShellExecutableName = "powershell.exe";
@@ -97,13 +98,27 @@ public static class ShortcutWriter
 
     private static void CreateWithShellLink(string shortcutPath, string targetPath, string workingDirectory, string description)
     {
-        var link = (IShellLinkW)new ShellLink();
-        link.SetPath(targetPath);
-        link.SetWorkingDirectory(workingDirectory);
-        link.SetDescription(description);
-        link.SetIconLocation(targetPath, 0);
-
-        ((IPersistFile)link).Save(shortcutPath, fRemember: true);
+        // Source-generated COM rather than [ComImport]: built-in COM interop cannot be
+        // trimmed, and a trimmed installer is a third the size, which is what Windows
+        // has to upload and check before it lets a new, unsigned download start.
+        _ = CoInitializeEx(IntPtr.Zero, CoinitMultithreaded);
+        var clsid = ShellLinkClassId;
+        var iid = typeof(IShellLinkW).GUID;
+        Marshal.ThrowExceptionForHR(CoCreateInstance(in clsid, IntPtr.Zero, ClsctxInprocServer, in iid, out var unknown));
+        try
+        {
+            var shell = new StrategyBasedComWrappers().GetOrCreateObjectForComInstance(unknown, CreateObjectFlags.UniqueInstance);
+            var link = (IShellLinkW)shell;
+            link.SetPath(targetPath);
+            link.SetWorkingDirectory(workingDirectory);
+            link.SetDescription(description);
+            link.SetIconLocation(targetPath, 0);
+            ((IPersistFile)shell).Save(shortcutPath, true);
+        }
+        finally
+        {
+            Marshal.Release(unknown);
+        }
     }
 
     private static string FindPowerShellExecutable()
@@ -125,61 +140,39 @@ public static class ShortcutWriter
         return PowerShellExecutableName;
     }
 
-    [ComImport]
-    [Guid("00021401-0000-0000-C000-000000000046")]
-    [ClassInterface(ClassInterfaceType.None)]
-    private sealed class ShellLink : IShellLinkW, IPersistFile
-    {
-        // The shell provides every member; this type exists only to be activated.
-        public extern void GetPath([Out, MarshalAs(UnmanagedType.LPWStr)] char[] file, int maxPath, IntPtr findData, int flags);
-        public extern void GetIDList(out IntPtr idList);
-        public extern void SetIDList(IntPtr idList);
-        public extern void GetDescription([Out, MarshalAs(UnmanagedType.LPWStr)] char[] name, int maxName);
-        public extern void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string name);
-        public extern void GetWorkingDirectory([Out, MarshalAs(UnmanagedType.LPWStr)] char[] dir, int maxPath);
-        public extern void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string dir);
-        public extern void GetArguments([Out, MarshalAs(UnmanagedType.LPWStr)] char[] args, int maxArgs);
-        public extern void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string args);
-        public extern void GetHotkey(out short hotkey);
-        public extern void SetHotkey(short hotkey);
-        public extern void GetShowCmd(out int showCmd);
-        public extern void SetShowCmd(int showCmd);
-        public extern void GetIconLocation([Out, MarshalAs(UnmanagedType.LPWStr)] char[] iconPath, int iconPathLength, out int iconIndex);
-        public extern void SetIconLocation([MarshalAs(UnmanagedType.LPWStr)] string iconPath, int iconIndex);
-        public extern void SetRelativePath([MarshalAs(UnmanagedType.LPWStr)] string relativePath, int reserved);
-        public extern void Resolve(IntPtr window, int flags);
-        public extern void SetPath([MarshalAs(UnmanagedType.LPWStr)] string file);
+    private const uint CoinitMultithreaded = 0;
+    private const uint ClsctxInprocServer = 1;
+    private static readonly Guid ShellLinkClassId = new("00021401-0000-0000-C000-000000000046");
 
-        public extern void GetClassID(out Guid classId);
-        [PreserveSig] public extern int IsDirty();
-        public extern void Load([MarshalAs(UnmanagedType.LPWStr)] string fileName, uint mode);
-        public extern void Save([MarshalAs(UnmanagedType.LPWStr)] string fileName, [MarshalAs(UnmanagedType.Bool)] bool fRemember);
-        public extern void SaveCompleted([MarshalAs(UnmanagedType.LPWStr)] string fileName);
-        public extern void GetCurFile([MarshalAs(UnmanagedType.LPWStr)] out string fileName);
-    }
+    [LibraryImport("ole32.dll")]
+    private static partial int CoInitializeEx(IntPtr reserved, uint coInit);
 
-    [ComImport]
+    [LibraryImport("ole32.dll")]
+    private static partial int CoCreateInstance(in Guid classId, IntPtr outer, uint context, in Guid interfaceId, out IntPtr instance);
+
+    // Every slot is declared, in the shell's order, so the ones used land at the right
+    // vtable offsets; the getters are never called and take raw buffers.
+    [GeneratedComInterface(StringMarshalling = StringMarshalling.Utf16)]
     [Guid("000214F9-0000-0000-C000-000000000046")]
-    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    private interface IShellLinkW
+    internal partial interface IShellLinkW
     {
-        void GetPath([Out, MarshalAs(UnmanagedType.LPWStr)] char[] file, int maxPath, IntPtr findData, int flags);
+        void GetPath(IntPtr file, int maxPath, IntPtr findData, int flags);
 
-        void GetIDList(out IntPtr idList);
+        void GetIdList(out IntPtr idList);
 
-        void SetIDList(IntPtr idList);
+        void SetIdList(IntPtr idList);
 
-        void GetDescription([Out, MarshalAs(UnmanagedType.LPWStr)] char[] name, int maxName);
+        void GetDescription(IntPtr name, int maxName);
 
-        void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string name);
+        void SetDescription(string name);
 
-        void GetWorkingDirectory([Out, MarshalAs(UnmanagedType.LPWStr)] char[] dir, int maxPath);
+        void GetWorkingDirectory(IntPtr dir, int maxPath);
 
-        void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string dir);
+        void SetWorkingDirectory(string dir);
 
-        void GetArguments([Out, MarshalAs(UnmanagedType.LPWStr)] char[] args, int maxArgs);
+        void GetArguments(IntPtr args, int maxArgs);
 
-        void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string args);
+        void SetArguments(string args);
 
         void GetHotkey(out short hotkey);
 
@@ -189,33 +182,32 @@ public static class ShortcutWriter
 
         void SetShowCmd(int showCmd);
 
-        void GetIconLocation([Out, MarshalAs(UnmanagedType.LPWStr)] char[] iconPath, int iconPathLength, out int iconIndex);
+        void GetIconLocation(IntPtr iconPath, int iconPathLength, out int iconIndex);
 
-        void SetIconLocation([MarshalAs(UnmanagedType.LPWStr)] string iconPath, int iconIndex);
+        void SetIconLocation(string iconPath, int iconIndex);
 
-        void SetRelativePath([MarshalAs(UnmanagedType.LPWStr)] string relativePath, int reserved);
+        void SetRelativePath(string relativePath, int reserved);
 
         void Resolve(IntPtr window, int flags);
 
-        void SetPath([MarshalAs(UnmanagedType.LPWStr)] string file);
+        void SetPath(string file);
     }
 
-    [ComImport]
+    [GeneratedComInterface(StringMarshalling = StringMarshalling.Utf16)]
     [Guid("0000010B-0000-0000-C000-000000000046")]
-    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    private interface IPersistFile
+    internal partial interface IPersistFile
     {
-        void GetClassID(out Guid classId);
+        void GetClassId(out Guid classId);
 
         [PreserveSig]
         int IsDirty();
 
-        void Load([MarshalAs(UnmanagedType.LPWStr)] string fileName, uint mode);
+        void Load(string fileName, uint mode);
 
-        void Save([MarshalAs(UnmanagedType.LPWStr)] string fileName, [MarshalAs(UnmanagedType.Bool)] bool fRemember);
+        void Save(string fileName, [MarshalAs(UnmanagedType.Bool)] bool remember);
 
-        void SaveCompleted([MarshalAs(UnmanagedType.LPWStr)] string fileName);
+        void SaveCompleted(string fileName);
 
-        void GetCurFile([MarshalAs(UnmanagedType.LPWStr)] out string fileName);
+        void GetCurFile(out IntPtr fileName);
     }
 }

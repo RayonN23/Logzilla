@@ -6,7 +6,6 @@ using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
 using System.Globalization;
 using System.Linq;
-using System.Text;
 using System.Text.RegularExpressions;
 using System.Windows.Forms;
 using Logzilla.App.Infrastructure;
@@ -40,12 +39,6 @@ internal sealed partial class LogView : Control
 {
     private const int LineReaderBuffer = 1 << 20;
 
-    /// <summary>Display lines the expanded row gives the message before it stops and
-    /// points at the Entry panel. Deep enough for a stack trace or a small XML
-    /// payload to be read in place; short enough that one entry cannot swallow the
-    /// whole viewport.</summary>
-    private const int MaxExpandedLines = 24;
-
     [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
     public ILogIndexer Indexer { get; set; }
 
@@ -73,13 +66,33 @@ internal sealed partial class LogView : Control
             _raw = value;
             _prefixCache.Clear();
             ForgetExpansion();
+            _maxMsgChars = 0;
+            Sync();
         }
     }
     private bool _raw;
     /// <summary>Wraps a long message across as many display lines as it needs instead
     /// of running it off the right edge. Mutually exclusive with horizontal scrolling:
-    /// there is nothing left to scroll to once everything is on screen.</summary>
-    public bool Wrap;
+    /// there is nothing left to scroll to once everything is on screen. Changing it
+    /// re-measures the scroll range, since every row's height changes with it.</summary>
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    public bool Wrap
+    {
+        get => _wrap;
+        set
+        {
+            if (_wrap == value)
+            {
+                return;
+            }
+            _wrap = value;
+            _maxMsgChars = 0;
+            _expandScroll = 0;
+            Sync();
+            Invalidate();
+        }
+    }
+    private bool _wrap;
     public int Selected = -1;
     public bool ShowSource = true;
     /// <summary>Shows the date-and-time column, which carries the whole
@@ -96,13 +109,32 @@ internal sealed partial class LogView : Control
     public TimeZoneInfo LocalZone = TimeZoneInfo.Local;
 
     public event EventHandler SelectionChanged;
-    public event EventHandler<WordPickedEventArgs> WordPicked;
     public event EventHandler CopyEntryRequested;
     public event EventHandler CopyAsJsonRequested;
     public event EventHandler NextErrorRequested;
     public event EventHandler BookmarkToggleRequested;
 
-    public sealed class WordPickedEventArgs : EventArgs { public string Word; public WordPickedEventArgs(string w) { Word = w; } }
+
+    /// <summary>A field value the user clicked in an expanded row, to go to the clipboard.</summary>
+    public sealed class FieldCopyEventArgs(string key, string value) : EventArgs
+    {
+        public string Key { get; } = key;
+        public string Value { get; } = value;
+    }
+
+    /// <summary>Clicking a value in an expanded row's field list copies it.</summary>
+    public event EventHandler<FieldCopyEventArgs> CopyFieldRequested;
+
+    /// <summary>
+    /// A piece of text as last painted: where it sits, what it says, where its column 0
+    /// lands, and — for a value in the field list — which field it is. What a click
+    /// lands on is read from these, so it is the word under the pointer as drawn: on a
+    /// wrapped line, in the field list, scrolled sideways, or in a JSON row whose raw
+    /// text looks nothing like what the grid shows.
+    /// </summary>
+    private readonly record struct TextRun(Rectangle Bounds, string Text, int OriginX, string FieldKey);
+
+    private readonly List<TextRun> _runs = new();
 
     private readonly ThinScrollBar _v = new(true);
     private readonly ThinScrollBar _h = new(false);
@@ -140,6 +172,12 @@ internal sealed partial class LogView : Control
     private Rectangle _copyIconRect, _markIconRect;
     private (int Line, int Width, int MsgX, int Height) _expandCache = (-2, -1, -1, -1);
     private (int Line, string Text) _expandText = (-2, null);
+    private (int Line, int Width, List<string> Lines) _expandLines = (-2, -1, null);
+
+    /// <summary>Pixels the page is scrolled past the top of its first row. Only ever
+    /// non-zero while an expanded row is taller than the window: the wheel then reads
+    /// down through it instead of stepping over it a whole row at a time.</summary>
+    private int _expandScroll;
     /// <summary>The selected run in doc line indices, resolved once per paint.</summary>
     private (int First, int Last) _paintedSelection = (-1, -2);
 
@@ -162,9 +200,10 @@ internal sealed partial class LogView : Control
     /// <summary>Gap between the severity spine and the stamp.</summary>
     private static int TimeTextPad => Dpi.S(10);
 
-    /// <summary>A single pathological line must not be able to push every other entry
-    /// off the screen when wrapping is on.</summary>
-    private const int MaxWrapLines = 40;
+    /// <summary>A safety stop on how many lines one wrapped row may take. It was 40, which
+    /// cut long messages short with Wrap on; a row taller than the window now scrolls
+    /// with the wheel instead, like an expanded one.</summary>
+    private const int MaxWrapLines = 5000;
 
     public LogView()
     {
@@ -175,10 +214,10 @@ internal sealed partial class LogView : Control
                  ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
         BackColor = Theme.BgData;
         Font = Theme.MonoBody;
-        _v.Dock = DockStyle.Right; _v.Width = Dpi.S(10);
-        _v.ValueChanged += delegate { Invalidate(); };
+        _v.Dock = DockStyle.Right; _v.Width = Dpi.S(10); _v.Name = "GridVerticalScroll";
+        _v.ValueChanged += delegate { _expandScroll = 0; Invalidate(); };
         Controls.Add(_v);
-        _h.Dock = DockStyle.Bottom; _h.Height = Dpi.S(10);
+        _h.Dock = DockStyle.Bottom; _h.Height = Dpi.S(10); _h.Name = "GridHorizontalScroll";
         _h.ValueChanged += delegate { Invalidate(); };
         Controls.Add(_h);
         _autoScroll.Tick += AutoScrollTick;
@@ -271,6 +310,11 @@ internal sealed partial class LogView : Control
 
     public void Attach(LogDocument f, FilterResult r)
     {
+        // A new result for the same file — a severity switched back on, a search changed,
+        // the file grew — keeps the reader's place: the line they had picked out stays
+        // where it was on screen. The top row used to be kept by its number, which in
+        // the new result is some other line entirely, so the place was lost.
+        var (anchorLine, rowsAbove) = f != null && f == _file && r != null ? PlaceToKeep() : (-1, 0);
         if (_feed != null) { _feed.Dispose(); _feed = null; }
         if (f != _file)
         {
@@ -281,6 +325,12 @@ internal sealed partial class LogView : Control
         // Tailing re-attaches the same document with new bytes behind it, so the
         // expanded row's text has to be read again either way.
         ForgetExpansion();
+        if (r != Res)
+        {
+            // A new result set has its own longest line; the old one must not keep
+            // the horizontal bar alive, nor its absence hide the new one's.
+            _maxMsgChars = 0;
+        }
         _file = f; Res = r;
         if (f != null)
         {
@@ -288,7 +338,37 @@ internal sealed partial class LogView : Control
         }
         Regutter();
         Sync();
+        if (anchorLine >= 0)
+        {
+            // The anchor line, or the nearest one before it the new filter still shows.
+            var p = Math.Max(0, ViewPosOf(anchorLine));
+            _expandScroll = 0;
+            SetTop(p - rowsAbove);
+        }
         Invalidate();
+    }
+
+    /// <summary>
+    /// What to hold still across a new result: the selected row while it is on screen,
+    /// and how many rows sat above it; otherwise the top row. (-1, 0) when there is no
+    /// result yet to hold a place in.
+    /// </summary>
+    private (int Line, int RowsAbove) PlaceToKeep()
+    {
+        if (Res == null || Res.View.Count == 0)
+        {
+            return (-1, 0);
+        }
+        var top = Math.Clamp(_v.Value, 0, Res.View.Count - 1);
+        if (Selected >= 0)
+        {
+            var p = ViewPosOf(Selected);
+            if (p >= top && p < Res.View.Count && Res.View[p] == Selected && HeaderOnScreen(p))
+            {
+                return (Selected, p - top);
+            }
+        }
+        return (Res.View[top], 0);
     }
 
     private static void IgnoreNonCritical(Exception ex, string context)
@@ -300,17 +380,118 @@ internal sealed partial class LogView : Control
     public int TopRow { get { return _v.Value; } }
     public int RowHeight { get { return _rowH; } }
 
-    private void Sync()
+    /// <summary>
+    /// Sizes the vertical bar to how far the top row can actually go. Measured from the
+    /// rows themselves, not as "count minus a page": with Wrap on, an expanded row or
+    /// date bands, rows are taller than one line, and counting them as one line hid the
+    /// bar — and stopped the wheel — while the last results were still off screen.
+    /// </summary>
+    private int Sync()
+    {
+        var top = MaxTop();
+        var vis = VisibleRows;
+        _v.LargeChange = Math.Max(1, vis);
+        _v.Maximum = top + _v.LargeChange - 1;
+        _v.Enabled = top > 0;
+        if (_v.Value > top)
+        {
+            _v.Value = top;
+        }
+        _v.Invalidate();
+        return top;
+    }
+
+    /// <summary>
+    /// Moves the top row, clamped to the range as it stands now. The bar is re-sized
+    /// first: it clamps whatever it is given to its own maximum, so handing it a row
+    /// past a stale maximum — the last row having just expanded, say — quietly stopped
+    /// short and left that row hanging off the bottom of the window.
+    /// </summary>
+    private void SetTop(int row)
+    {
+        _v.Value = Math.Max(0, Math.Min(Sync(), row));
+        Invalidate();
+    }
+
+    /// <summary>The furthest the top row can scroll and still leave the last row on
+    /// screen: rows measured back from the end until the window is full.</summary>
+    private int MaxTop()
     {
         var cnt = Res == null ? 0 : Res.View.Count;
-        var vis = VisibleRows;
-        _v.Maximum = Math.Max(0, cnt - 1);
-        _v.LargeChange = Math.Max(1, vis);
-        _v.Enabled = cnt > vis;
-        if (_v.Value > Math.Max(0, cnt - vis))
+        if (cnt == 0 || _file == null)
         {
-            _v.Value = Math.Max(0, cnt - vis);
+            return 0;
         }
+        var vh = ClientSize.Height - _h.Height;
+        var used = 0;
+        for (var p = cnt - 1; p >= 0; p--)
+        {
+            used += HeightOf(Res.View[p]);
+            if (used > vh)
+            {
+                return Math.Min(p + 1, cnt - 1);
+            }
+            if (p > 0 && BandBetween(Res.View[p - 1], Res.View[p]))
+            {
+                used += Dpi.S(Theme.DateBandHeight);
+            }
+        }
+        return 0;
+    }
+
+    /// <summary>How tall line <paramref name="i"/>'s row is drawn, as BuildSlots lays it out.</summary>
+    private int HeightOf(int i)
+    {
+        if (i == Selected && CanExpand)
+        {
+            return _rowH + GetExpansionHeight(i);
+        }
+        if (Wrap && _feed != null)
+        {
+            return Math.Max(1, WrapSegments(DisplayText(i), MessageWidth, _cw).Count) * _rowH;
+        }
+        return _rowH;
+    }
+
+    /// <summary>Whether a date band is drawn between two neighbouring rows.</summary>
+    private bool BandBetween(int a, int b)
+    {
+        if (ShowTime || _file == null)
+        {
+            return false;
+        }
+        var ka = DateKeyOf(ShownTime(a));
+        var kb = DateKeyOf(ShownTime(b));
+        return ka != null && kb != null && ka != kb;
+    }
+
+    /// <summary>Whether the row at view position <paramref name="p"/> starts inside the
+    /// window with its first line showing — by height, so a wrapped row below a few tall
+    /// ones counts as off screen even when few enough rows sit above it.</summary>
+    private bool HeaderOnScreen(int p)
+    {
+        var top = _v.Value;
+        if (p < top)
+        {
+            return false;
+        }
+        var vh = ClientSize.Height - _h.Height;
+        var y = -_expandScroll;
+        for (var q = top; q < p; q++)
+        {
+            y += HeightOf(Res.View[q]);
+            if (BandBetween(Res.View[q], Res.View[q + 1]))
+            {
+                y += Dpi.S(Theme.DateBandHeight);
+            }
+            if (y >= vh)
+            {
+                return false;
+            }
+        }
+        var line = Res.View[p];
+        var h = line == Selected && CanExpand ? _rowH : HeightOf(line);
+        return y >= 0 && y + Math.Min(h, vh) <= vh;
     }
 
     /// <summary>Pixels available to the message column, scrollbar and padding removed.</summary>
@@ -330,16 +511,32 @@ internal sealed partial class LogView : Control
     {
         var avail = Math.Max(1, w - MessageX - Dpi.S(Theme.ColMessageRightPad));
         var need = Wrap ? 0 : (int)(_maxMsgChars * _cw);
+        var before = _h.Value;
         _h.Maximum = Math.Max(0, need - 1);
         _h.LargeChange = Math.Max(1, avail);
         _h.Enabled = need > avail;
+        if (_h.Value != before)
+        {
+            // The bar shrank under a scrolled-right view (a search left only short
+            // lines, or Wrap went on). This frame was drawn at the old offset, so draw
+            // it again rather than leave the text cut off with no bar to scroll back.
+            Invalidate();
+        }
     }
 
-    protected override void OnResize(EventArgs e) { base.OnResize(e); Sync(); }
-    protected override void OnFontChanged(EventArgs e) { base.OnFontChanged(e); Measure(); Sync(); Invalidate(); }
+    protected override void OnResize(EventArgs e) { base.OnResize(e); _expandScroll = 0; Sync(); }
+    protected override void OnFontChanged(EventArgs e) { base.OnFontChanged(e); Measure(); ForgetExpansion(); Sync(); Invalidate(); }
 
-    /// <summary>Which character column a mouse X lands on, within the message text.</summary>
-    public int ColumnAt(int mouseX) { return (int)((mouseX - MessageX + _h.Value) / _cw); }
+
+    /// <summary>
+    /// The movement keys belong to the grid. Without this Windows treats the arrows as
+    /// "move focus to the next control", so after clicking a row the first Up or Down
+    /// moved focus to the minimap instead of moving the selection.
+    /// </summary>
+    protected override bool IsInputKey(Keys keyData) =>
+        (keyData & Keys.KeyCode) is Keys.Up or Keys.Down or Keys.Left or Keys.Right or
+            Keys.PageUp or Keys.PageDown or Keys.Home or Keys.End or Keys.Escape
+        || base.IsInputKey(keyData);
 
     protected override void OnMouseWheel(MouseEventArgs e)
     {
@@ -349,33 +546,142 @@ internal sealed partial class LogView : Control
         }
         else
         {
-            ScrollBy(-Math.Sign(e.Delta) * 3);
+            WheelBy(-Math.Sign(e.Delta) * 3);
         }
     }
 
-    public void ScrollBy(int rows)
+    /// <summary>
+    /// Wheel scrolling. Rows step as usual, except through an expanded row taller than
+    /// the window: that one scrolls a few lines at a time, so a long XML payload or
+    /// stack trace can be read to its end in place.
+    /// </summary>
+    private void WheelBy(int rows)
     {
-        var cnt = Res == null ? 0 : Res.View.Count;
-        var max = Math.Max(0, cnt - VisibleRows);
-        _v.Value = Math.Max(0, Math.Min(max, _v.Value + rows));
-        Invalidate();
+        var vh = ClientSize.Height - _h.Height;
+        var ex = TallSlot(vh);
+        if (rows > 0 && ex is { } s && s.Y + s.Height > vh)
+        {
+            _expandScroll += Math.Min(rows * _rowH, s.Y + s.Height - vh);
+            Invalidate();
+            return;
+        }
+        if (rows < 0 && _expandScroll > 0)
+        {
+            _expandScroll = Math.Max(0, _expandScroll + rows * _rowH);
+            Invalidate();
+            return;
+        }
+        var before = _v.Value;
+        ScrollBy(rows);
+        // Coming back up onto a row taller than the window lands on its end, so reading
+        // back up through it is as continuous as reading down.
+        if (rows < 0 && Res != null)
+        {
+            for (var p = before - 1; p >= _v.Value; p--)
+            {
+                var h = HeightOf(Res.View[p]);
+                if (h > vh)
+                {
+                    _v.Value = p;
+                    _expandScroll = h - vh;
+                    Invalidate();
+                    break;
+                }
+            }
+        }
     }
 
-    public void ScrollTo(int viewPos, bool center)
+    protected override AccessibleObject CreateAccessibilityInstance() => new GridAccessible(this);
+
+    /// <summary>
+    /// Which results are fully on screen, as "showing 1 to 20 of 30" (positions in the
+    /// filtered view, from the last paint). A screen reader can say where the user is,
+    /// and the end-to-end tests can tell the last result really can be scrolled to.
+    /// </summary>
+    private sealed class GridAccessible(LogView owner) : ControlAccessibleObject(owner)
+    {
+        public override string Value => owner.ShowingText();
+    }
+
+    private string ShowingText()
     {
         var cnt = Res == null ? 0 : Res.View.Count;
-        var max = Math.Max(0, cnt - VisibleRows);
-        var t = center ? viewPos - VisibleRows / 2 : viewPos;
-        _v.Value = Math.Max(0, Math.Min(max, t));
-        Invalidate();
+        if (cnt == 0 || _slots.Count == 0)
+        {
+            return "showing 0 of " + cnt.ToString(CultureInfo.InvariantCulture);
+        }
+        var vh = ClientSize.Height - _h.Height;
+        int first = -1, last = -1;
+        foreach (var s in _slots)
+        {
+            if (s.Line < 0)
+            {
+                continue;
+            }
+            // A row taller than the window counts when it fills the window, from its
+            // own top down (or scrolled within) — not when it hangs off the bottom.
+            var fits = s.Height <= vh ? s.Y >= 0 && s.Y + s.Height <= vh : s.Y <= 0;
+            if (!fits)
+            {
+                continue;
+            }
+            var p = ViewPosOf(s.Line);
+            if (first < 0)
+            {
+                first = p;
+            }
+            last = p;
+        }
+        if (first < 0)
+        {
+            return "showing 0 of " + cnt.ToString(CultureInfo.InvariantCulture);
+        }
+        return "showing " + (first + 1).ToString(CultureInfo.InvariantCulture) + " to " +
+               (last + 1).ToString(CultureInfo.InvariantCulture) + " of " + cnt.ToString(CultureInfo.InvariantCulture);
     }
+
+    /// <summary>The row the wheel should read down through rather than step past: the
+    /// expanded one when it runs off the bottom, or any row taller than the window.</summary>
+    private RowSlot? TallSlot(int vh)
+    {
+        if (ExpandedSlot() is { } ex)
+        {
+            return ex;
+        }
+        foreach (var s in _slots)
+        {
+            if (s.Line >= 0 && s.Height > vh)
+            {
+                return s;
+            }
+        }
+        return null;
+    }
+
+    private RowSlot? ExpandedSlot()
+    {
+        if (Selected < 0 || !CanExpand)
+        {
+            return null;
+        }
+        foreach (var s in _slots)
+        {
+            if (s.Line == Selected)
+            {
+                return s;
+            }
+        }
+        return null;
+    }
+
+    public void ScrollBy(int rows) => SetTop(_v.Value + rows);
+
+    public void ScrollTo(int viewPos, bool center) => SetTop(center ? viewPos - VisibleRows / 2 : viewPos);
 
     public void ScrollFraction(float f)
     {
         var cnt = Res == null ? 0 : Res.View.Count;
-        var max = Math.Max(0, cnt - VisibleRows);
-        _v.Value = Math.Max(0, Math.Min(max, (int)(f * cnt) - VisibleRows / 2));
-        Invalidate();
+        SetTop((int)(f * cnt) - VisibleRows / 2);
     }
 
     public int ViewPosOf(int line)
@@ -429,7 +735,9 @@ internal sealed partial class LogView : Control
     {
         Selected = -1;
         _anchor = -1;
+        _expandScroll = 0;
         ForgetExpansion();
+        Sync();
     }
 
     /// <summary>Selects every row the current filter left showing.</summary>
@@ -446,12 +754,16 @@ internal sealed partial class LogView : Control
     private void MoveTo(int line, bool center)
     {
         Selected = line;
+        _expandScroll = 0;
+        _collapsed = false;
         ForgetExpansion();
         var p = ViewPosOf(line);
-        if (p >= 0 && (center || p < _v.Value || p >= _v.Value + VisibleRows))
+        if (p >= 0 && (center || !HeaderOnScreen(p)))
         {
             ScrollTo(p, center);
         }
+        // The selected row expands, so the bottom of the range moves with it.
+        Sync();
         Invalidate();
         if (Selected >= 0 && _file is not null)
         {
@@ -514,7 +826,35 @@ internal sealed partial class LogView : Control
     /// makes the row several times taller, and having the layout shift under a drag
     /// in progress would move the rows out from under the pointer.
     /// </summary>
-    private bool CanExpand => !HasRange && !_dragging;
+    private bool CanExpand => !HasRange && !_dragging && !_collapsed;
+
+    /// <summary>The selected row was clicked again (or Esc pressed) to fold it back to
+    /// one line. Choosing any other row expands that one as usual.</summary>
+    private bool _collapsed;
+
+    /// <summary>True while the selected row is shown expanded.</summary>
+    public bool IsExpanded => Selected >= 0 && CanExpand;
+
+    /// <summary>Folds the expanded row back to one line, keeping it selected. False when
+    /// there was nothing expanded to fold.</summary>
+    public bool Collapse()
+    {
+        if (!IsExpanded)
+        {
+            return false;
+        }
+        SetCollapsed(true);
+        return true;
+    }
+
+    private void SetCollapsed(bool collapsed)
+    {
+        _collapsed = collapsed;
+        _expandScroll = 0;
+        ForgetExpansion();
+        Sync();
+        Invalidate();
+    }
 
     /// <summary>The selected rows as doc line indices, in the order they are shown.</summary>
     public List<int> SelectedLines()
@@ -587,9 +927,10 @@ internal sealed partial class LogView : Control
         return text;
     }
 
-    /// <summary>Beyond this the row is a data dump, not something anyone reads in a
-    /// grid; the Entry panel and Ctrl+C still hand over the whole thing.</summary>
-    private const int MaxExpandedChars = 64 * 1024;
+    /// <summary>A safety stop for a runaway line (a whole file with no line breaks),
+    /// far past any real payload; the Entry panel and Ctrl+C still hand over the
+    /// whole thing.</summary>
+    private const int MaxExpandedChars = 2 * 1024 * 1024;
 
     /// <summary>
     /// The whole entry laid out for the expanded row: the exception intact, and an
@@ -615,16 +956,35 @@ internal sealed partial class LogView : Control
     {
         _expandCache = (-2, -1, -1, -1);
         _expandText = (-2, null);
+        _expandLines = (-2, -1, null);
     }
 
-    /// <summary>The text as shown in a collapsed row: GridTextOf, clipped for paint performance.</summary>
+    /// <summary>The expanded row's message broken into display lines. Cached: a long
+    /// payload runs to thousands of lines, and the row repaints on every hover.</summary>
+    private List<string> ExpandedLinesOf(Graphics g, int line, int width)
+    {
+        if (_expandLines.Line == line && _expandLines.Width == width)
+        {
+            return _expandLines.Lines;
+        }
+        var lines = WrapText(g, ExpandedTextOf(line), Font, width);
+        _expandLines = (line, width, lines);
+        return lines;
+    }
+
+    /// <summary>The text as shown in a collapsed row: GridTextOf, whole.</summary>
     private string DisplayText(int line) => Clip(GridTextOf(line));
+
+    /// <summary>A safety stop for a runaway line (a whole file with no line breaks), far
+    /// past any real message. It was 4,000 characters, which cut genuine long messages
+    /// short with "..." in the row.</summary>
+    private const int MaxRowChars = 100_000;
 
     private static string Clip(string text)
     {
-        if (text.Length > 4000)
+        if (text.Length > MaxRowChars)
         {
-            text = string.Concat(text.AsSpan(0, 4000), " ...");
+            text = string.Concat(text.AsSpan(0, MaxRowChars), " ...");
         }
         return text.Replace('\t', ' ');
     }
@@ -708,6 +1068,7 @@ internal sealed partial class LogView : Control
         _autoScrollDir = 0;
         _autoScroll.Stop();
         // The row could not expand while the button was down; now it can.
+        Sync();
         Invalidate();
     }
 
@@ -803,7 +1164,17 @@ internal sealed partial class LogView : Control
             }
             return;
         }
-        if ((ModifierKeys & Keys.Shift) == Keys.Shift)
+        var shift = (ModifierKeys & Keys.Shift) == Keys.Shift;
+        if (!shift && s.Line == Selected && !HasRange)
+        {
+            // Clicking the selected row again folds it away, and once more opens it —
+            // every click, however quickly it follows the last. A quick second click used
+            // to count as a double-click, which picked a word into the Find box instead:
+            // the row stayed open and the view re-filtered on whatever word was under it.
+            SetCollapsed(!_collapsed);
+            return;
+        }
+        if (shift)
         {
             SelectTo(s.Line, false);
         }
@@ -828,32 +1199,43 @@ internal sealed partial class LogView : Control
         return null;
     }
 
-    [SuppressMessage("Major Code Smell", "S3776", Justification = "Interaction path normalizes raw and parsed text for precise word picks.")]
-    protected override void OnMouseDoubleClick(MouseEventArgs e)
+    /// <summary>
+    /// The word under <paramref name="p"/> as the grid last drew it, or "" if there is
+    /// none. A value in an expanded row's field list comes back whole, with its key in
+    /// <paramref name="fieldKey"/>; anywhere else <paramref name="fieldKey"/> is null.
+    /// </summary>
+    public string PickAt(Point p, out string fieldKey)
     {
-        if (Res == null || Selected < 0)
+        fieldKey = null;
+        foreach (var run in _runs)
         {
-            return;
+            if (!run.Bounds.Contains(p))
+            {
+                continue;
+            }
+            if (run.FieldKey != null)
+            {
+                fieldKey = run.FieldKey;
+                return run.Text;
+            }
+            var t = run.Text;
+            var col = (int)((p.X - run.OriginX) / _cw);
+            if (col < 0 || col >= t.Length || !IsWord(t[col]))
+            {
+                return "";
+            }
+            int a = col, b = col;
+            while (a > 0 && IsWord(t[a - 1]))
+            {
+                a--;
+            }
+            while (b < t.Length && IsWord(t[b]))
+            {
+                b++;
+            }
+            return t.Substring(a, b - a);
         }
-        var t = DisplayText(Selected);
-        var col = ColumnAt(e.X);
-        if (col < 0 || col >= t.Length)
-        {
-            return;
-        }
-        int a = col, b = col;
-        while (a > 0 && IsWord(t[a - 1]))
-        {
-            a--;
-        }
-        while (b < t.Length && IsWord(t[b]))
-        {
-            b++;
-        }
-        if (b > a)
-        {
-            WordPicked?.Invoke(this, new WordPickedEventArgs(t.Substring(a, b - a)));
-        }
+        return "";
     }
 
     private static bool IsWord(char c) { return char.IsLetterOrDigit(c) || c == '_' || c == '.' || c == '-' || c == ':' || c == '/' || c == '='; }
@@ -866,26 +1248,13 @@ internal sealed partial class LogView : Control
         {
             if (Query.Rx != null)
             {
-                try
-                {
-                    var guard = 0;
-                    foreach (Match m in Query.Rx.Matches(text))
-                    {
-                        if (m.Length == 0 || guard++ > 200)
-                        {
-                            break;
-                        }
-                        list.Add(new Highlight(m.Index, m.Index + m.Length, Theme.MatchText, true));
-                    }
-                }
-                catch (Exception ex) { IgnoreNonCritical(ex, "Regex highlight"); }
+                AddRegexMatches(list, text, Query.Rx.ToString(), Query.Rx.Options, Theme.MatchText, true, 200);
             }
             else
             {
                 var hay = Query.Cs ? text : text.ToLowerInvariant();
-                foreach (var nb in Query.Inc)
+                foreach (var needle in Query.IncludeTerms)
                 {
-                    var needle = Encoding.UTF8.GetString(nb);
                     int p = 0, guard = 0;
                     while (guard++ < 200)
                     {
@@ -930,19 +1299,7 @@ internal sealed partial class LogView : Control
             }
             if (r.IsRegex)
             {
-                try
-                {
-                    var guard = 0;
-                    foreach (Match m in Regex.Matches(text, r.Pattern, RegexOptions.IgnoreCase))
-                    {
-                        if (m.Length == 0 || guard++ > 120)
-                        {
-                            break;
-                        }
-                        list.Add(new Highlight(m.Index, m.Index + m.Length, r.C, false));
-                    }
-                }
-                catch (Exception ex) { IgnoreNonCritical(ex, "Rule highlight"); }
+                AddRegexMatches(list, text, r.Pattern, RegexOptions.IgnoreCase, r.C, false, 120);
             }
             else
             {
@@ -960,6 +1317,51 @@ internal sealed partial class LogView : Control
             }
         }
         return list;
+    }
+
+    /// <summary>Longest one highlight pattern may run on one row. Highlighting runs on
+    /// the UI thread for every row on screen, so a pattern that backtracks badly must
+    /// not be able to freeze the window.</summary>
+    private static readonly TimeSpan PaintRegexTimeout = TimeSpan.FromMilliseconds(100);
+
+    /// <summary>Highlight patterns, compiled once rather than on every row of every paint.
+    /// A null entry is a pattern that is invalid or proved too slow: it is skipped from
+    /// then on instead of throwing again for each row.</summary>
+    private readonly Dictionary<(string Pattern, RegexOptions Options), Regex> _paintRegex = new();
+
+    private void AddRegexMatches(List<Highlight> list, string text, string pattern, RegexOptions options, Color color, bool isMatch, int max)
+    {
+        var key = (pattern, options);
+        if (!_paintRegex.TryGetValue(key, out var rx))
+        {
+            try { rx = new Regex(pattern, options, PaintRegexTimeout); }
+            catch (ArgumentException) { rx = null; }
+            if (_paintRegex.Count > 64)
+            {
+                _paintRegex.Clear();
+            }
+            _paintRegex[key] = rx;
+        }
+        if (rx == null)
+        {
+            return;
+        }
+        try
+        {
+            var guard = 0;
+            for (var m = rx.Match(text); m.Success; m = m.NextMatch())
+            {
+                if (m.Length == 0 || guard++ > max)
+                {
+                    break;
+                }
+                list.Add(new Highlight(m.Index, m.Index + m.Length, color, isMatch));
+            }
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            _paintRegex[key] = null;
+        }
     }
 
     private static string DateKeyOf(double ms)
@@ -1004,7 +1406,7 @@ internal sealed partial class LogView : Control
         {
             return slots;
         }
-        var y = 0;
+        var y = -_expandScroll;
         var vh = ClientSize.Height - _h.Height;
         string lastDate = null;
         for (var p = _v.Value; p < Res.View.Count && y < vh; p++)
@@ -1063,6 +1465,7 @@ internal sealed partial class LogView : Control
         var g = e.Graphics;
         g.Clear(Theme.BgData);
         _hitActions.Clear();
+        _runs.Clear();
         if (_file == null || Res == null || Res.View.Count == 0)
         {
             var msg = _file == null
@@ -1075,7 +1478,8 @@ internal sealed partial class LogView : Control
 
         _slots = BuildSlots();
         var w = ClientSize.Width - _v.Width;
-        _maxMsgChars = 0;
+        // _maxMsgChars only grows while the same results are shown: sized from the
+        // rows on screen alone, the bar came and went as you scrolled.
         // Resolved once per frame rather than per row: it is a binary search each time.
         _paintedSelection = SelectedLineRange();
 
@@ -1185,6 +1589,7 @@ internal sealed partial class LogView : Control
 
         var msgRect = new Rectangle(MessageX, y, msgW, slot.Height);
         var ox = msgRect.X - _h.Value;
+        _runs.Add(new TextRun(msgRect, text, ox, null));
 
         DrawHighlightBackdrops(g, text, msgRect, ox);
 
@@ -1219,6 +1624,7 @@ internal sealed partial class LogView : Control
             var lineY = slot.Y + k * _rowH;
             var lineText = text.Substring(start, len);
             var lineRect = new Rectangle(MessageX, lineY, msgW, _rowH);
+            _runs.Add(new TextRun(lineRect, lineText, MessageX, null));
 
             // Column 0 of the full message sits this far left of the visible line, so
             // a highlight's character offsets still land in the right place.
@@ -1320,9 +1726,8 @@ internal sealed partial class LogView : Control
 
         // The full message starts on the header line itself and wraps below it;
         // every line stops short of the row icons so nothing is drawn under them.
-        var text = ExpandedTextOf(i);
         var msgColor = _file.Flag[i] == 1 ? Theme.TextDim : Theme.MsgColor[sev];
-        var cy = DrawFullMessage(g, text, msgColor, MessageX, y + _textTop, ExpandedTextRight(w));
+        var cy = DrawFullMessage(g, i, msgColor, MessageX, y + _textTop, ExpandedTextRight(w));
         cy = DrawFieldGrid(g, i, MessageX, cy, w - Dpi.S(Theme.ColMessageRightPad));
         DrawActionRow(g, i, MessageX, cy, w - Dpi.S(Theme.ColMessageRightPad));
     }
@@ -1332,28 +1737,42 @@ internal sealed partial class LogView : Control
 
     private int TopFor(Font f) => Math.Max(0, (_rowH - f.Height) / 2);
 
-    private int DrawFullMessage(Graphics g, string text, Color color, int x, int y, int right)
+    /// <summary>The whole message, however long. Only the lines inside the window are
+    /// drawn; the rest just take up their height.</summary>
+    private int DrawFullMessage(Graphics g, int line, Color color, int x, int y, int right)
     {
         var width = Math.Max(20, right - x);
-        var lines = WrapText(g, text, Font, width);
-        var shown = Math.Min(lines.Count, MaxExpandedLines);
-        for (var k = 0; k < shown; k++)
+        var lines = ExpandedLinesOf(g, line, width);
+        var bottom = ClientSize.Height;
+        var first = y < 0 ? Math.Min(lines.Count, -y / _rowH) : 0;
+        y += first * _rowH;
+        for (var k = first; k < lines.Count; k++)
         {
-            TextRenderer.DrawText(g, lines[k], Font, new Point(x, y), color, Theme.TextFlagsPoint);
+            if (y < bottom)
+            {
+                // Highlights and search matches carry on into the expanded row: they used
+                // to vanish the moment a highlighted line was clicked open.
+                DrawHighlightBackdrops(g, lines[k], new Rectangle(x, y, Math.Max(1, right - x), _rowH), x);
+                TextRenderer.DrawText(g, lines[k], Font, new Point(x, y), color, Theme.TextFlagsPoint);
+                _runs.Add(new TextRun(new Rectangle(x, y, Math.Max(1, right - x), _rowH), lines[k], x, null));
+            }
             y += _rowH;
         }
-        if (lines.Count > MaxExpandedLines)
+        if (lines.Count >= MaxMeasuredLines)
         {
-            TextRenderer.DrawText(g, (lines.Count - MaxExpandedLines) + " more lines — Ctrl+C copies the whole entry, the Entry panel shows it",
-                Theme.MonoTiny, new Point(x, y), Theme.TextDim, Theme.TextFlagsPoint);
+            if (y < bottom)
+            {
+                TextRenderer.DrawText(g, "The entry continues — Ctrl+C copies all of it, the Entry panel shows it",
+                    Theme.MonoTiny, new Point(x, y), Theme.TextDim, Theme.TextFlagsPoint);
+            }
             y += _rowH;
         }
         return y - _textTop + Dpi.S(6);
     }
 
-    /// <summary>Hard cap on how much of one entry is ever laid out, however wide the
-    /// text or narrow the column.</summary>
-    private const int MaxMeasuredLines = 400;
+    /// <summary>A safety stop on how much of one entry is ever laid out; no real
+    /// payload comes near it.</summary>
+    private const int MaxMeasuredLines = 200_000;
 
     /// <summary>
     /// Breaks text into display lines: on its own line breaks first — an indented XML
@@ -1409,7 +1828,13 @@ internal sealed partial class LogView : Control
     [GeneratedRegex("([A-Za-z_][\\w.\\-]{1,32})=(?:\"([^\"]{0,120})\"|'([^']{0,120})'|([^\\s,;)\\]}\"']{1,120}))")]
     private static partial Regex FieldRx { get; }
 
-    private List<(string Key, string Value)> ExtractFields(int line) => ExtractFields(line, 6, keepIds: false);
+    /// <summary>Fields shown in an expanded row. Twelve, not six: with six, a record's
+    /// ThreadId was usually the one left off. The ids people follow come first.</summary>
+    private List<(string Key, string Value)> ExtractFields(int line) =>
+        ExtractFields(line, 24, keepIds: false)
+            .OrderBy(f => FieldNames.FollowRank(f.Key))
+            .Take(12)
+            .ToList();
 
     /// <summary>
     /// The entry's named fields: a JSON record's properties, or the key=value pairs of
@@ -1472,28 +1897,69 @@ internal sealed partial class LogView : Control
     }
 
 
-    private int DrawFieldGrid(Graphics g, int line, int x, int y, int right)
+    /// <summary>One field in an expanded row's list: where it sits and its value broken
+    /// into the lines it needs.</summary>
+    private readonly record struct FieldCell(string Key, string Value, Rectangle Bounds, List<string> Lines);
+
+    /// <summary>
+    /// Lays out the field list two to a row. A value too long for its column wraps onto
+    /// as many lines as it needs and its row grows to fit — it used to be cut off with
+    /// "..." ("Soti.MobiControl.WindowsModern.Ser..."). Drawing and measuring both use
+    /// this, so the row is always exactly as tall as what is drawn in it.
+    /// </summary>
+    private (List<FieldCell> Cells, int Height) LayoutFields(Graphics g, int line, int x, int y, int right)
     {
+        var cells = new List<FieldCell>();
         var fields = ExtractFields(line);
         if (fields.Count == 0)
         {
-            return y;
+            return (cells, 0);
         }
         var colW = Math.Max(Dpi.S(140), (right - x) / 2);
-        var rowH = Dpi.S(18);
-        for (var k = 0; k < fields.Count; k++)
+        var lineH = Dpi.S(18);
+        var valueW = Math.Max(20, colW - Dpi.S(100));
+        var cw = Math.Max(1f, TextRenderer.MeasureText(g, "0000000000", Theme.MonoTiny, new Size(short.MaxValue, short.MaxValue), Theme.TextFlags).Width / 10f);
+        var perLine = Math.Max(4, (int)(valueW / cw));
+        var top = y;
+        for (var k = 0; k < fields.Count; k += 2)
         {
-            var col = k % 2;
-            var row = k / 2;
-            var cx = x + col * colW;
-            var cy = y + row * rowH;
-            var (key, value) = fields[k];
-            TextRenderer.DrawText(g, key, Theme.MonoTiny, new Rectangle(cx, cy, Dpi.S(90), rowH), Theme.TextDim, Theme.TextFlags);
-            var valueRect = new Rectangle(cx + Dpi.S(94), cy, Math.Max(20, colW - Dpi.S(100)), rowH);
-            TextRenderer.DrawText(g, value, Theme.MonoTiny, valueRect, Theme.Text, Theme.TextFlagsEllipsis);
+            var pair = new List<(string Key, string Value, List<string> Lines)>();
+            for (var c = k; c < Math.Min(k + 2, fields.Count); c++)
+            {
+                var lines = new List<string>();
+                WrapParagraph(lines, fields[c].Value.Replace('\n', ' ').Replace('\r', ' ').Replace('\t', ' '), perLine);
+                pair.Add((fields[c].Key, fields[c].Value, lines));
+            }
+            var rowLines = pair.Max(f => Math.Max(1, f.Lines.Count));
+            for (var c = 0; c < pair.Count; c++)
+            {
+                var bounds = new Rectangle(x + c * colW, top, colW, rowLines * lineH);
+                cells.Add(new FieldCell(pair[c].Key, pair[c].Value, bounds, pair[c].Lines));
+            }
+            top += rowLines * lineH;
         }
-        var rows = (fields.Count + 1) / 2;
-        return y + rows * rowH + Dpi.S(6);
+        return (cells, top - y + Dpi.S(6));
+    }
+
+    private int DrawFieldGrid(Graphics g, int line, int x, int y, int right)
+    {
+        var (cells, height) = LayoutFields(g, line, x, y, right);
+        var lineH = Dpi.S(18);
+        foreach (var cell in cells)
+        {
+            var (key, value) = (cell.Key, cell.Value);
+            var b = cell.Bounds;
+            _runs.Add(new TextRun(b, value, b.X, key));
+            _hitActions.Add((b, () => CopyFieldRequested?.Invoke(this, new FieldCopyEventArgs(key, value))));
+            TextRenderer.DrawText(g, FieldNames.Display(key), Theme.MonoTiny, new Rectangle(b.X, b.Y, Dpi.S(90), lineH), Theme.TextDim, Theme.TextFlags);
+            var vx = b.X + Dpi.S(94);
+            var vw = Math.Max(20, b.Width - Dpi.S(100));
+            for (var k = 0; k < cell.Lines.Count; k++)
+            {
+                TextRenderer.DrawText(g, cell.Lines[k], Theme.MonoTiny, new Rectangle(vx, b.Y + k * lineH, vw + Dpi.S(4), lineH), Theme.Text, Theme.TextFlags);
+            }
+        }
+        return y + height;
     }
 
     private void DrawActionRow(Graphics g, int line, int x, int y, int right)
@@ -1559,14 +2025,12 @@ internal sealed partial class LogView : Control
         // Mirrors DrawExpandedRow: message wraps from the header line down, then the
         // field grid, then the action row. Returned height excludes the header line.
         var w = ClientSize.Width - _v.Width;
-        var text = ExpandedTextOf(line);
         var width = Math.Max(20, ExpandedTextRight(w) - MessageX);
-        var lines = WrapText(g, text, Font, width);
-        var msgLines = Math.Min(lines.Count, MaxExpandedLines) + (lines.Count > MaxExpandedLines ? 1 : 0);
+        var lines = ExpandedLinesOf(g, line, width);
+        var msgLines = lines.Count + (lines.Count >= MaxMeasuredLines ? 1 : 0);
         var msgH = (msgLines - 1) * _rowH + Dpi.S(6);
 
-        var fields = ExtractFields(line);
-        var gridH = fields.Count == 0 ? 0 : ((fields.Count + 1) / 2) * Dpi.S(18) + Dpi.S(6);
+        var gridH = LayoutFields(g, line, MessageX, 0, w - Dpi.S(Theme.ColMessageRightPad)).Height;
 
         var actionH = Dpi.S(22) + Dpi.S(10);
         return msgH + gridH + actionH;

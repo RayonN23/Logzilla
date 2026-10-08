@@ -22,11 +22,33 @@
     <PublishReadyToRun>true</PublishReadyToRun>
   </PropertyGroup>
 
+  <!-- "Sign in with GitHub" uses Logzilla's registered GitHub OAuth App, which has Device
+       Flow enabled. Its Client ID is public — it names the app, it does not authenticate
+       it, and GitHub shows it in the browser during every sign-in — so it is compiled
+       in, as GitHub recommends for desktop apps. There is no client secret and there
+       must never be one here: device-flow tokens are issued without it. Pass
+       /p:GitHubClientId=... (or build.ps1 -GitHubClientId) to use another app; an
+       organisation can use its own through the AIGitHubClientId policy. -->
+  <PropertyGroup>
+    <GitHubClientId Condition="'$(GitHubClientId)' == ''">Ov23liJomEFcZD4niFXd</GitHubClientId>
+  </PropertyGroup>
+  <ItemGroup>
+    <AssemblyMetadata Include="GitHubClientId" Value="$(GitHubClientId)" Visible="false" />
+  </ItemGroup>
+
+  <!-- The AI packages load only when someone asks a question, never at startup, so
+       precompiling them buys nothing and roughly doubles their size on disk. -->
+  <ItemGroup>
+    <PublishReadyToRunExclude Include="GitHub.Copilot.SDK.dll;Anthropic.dll;OpenAI.dll;System.ClientModel.dll" Visible="false" />
+    <PublishReadyToRunExclude Include="Microsoft.Extensions.AI.dll;Microsoft.Extensions.AI.Abstractions.dll;Microsoft.Extensions.AI.OpenAI.dll" Visible="false" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\Logzilla.Core\Logzilla.Core.csproj" />
     <!-- The host is the one place an implementation may be referenced: it exists
          solely to compose the concrete services in Program.Main. -->
     <ProjectReference Include="..\Logzilla.Core.Implementation\Logzilla.Core.Implementation.csproj" />
+    <ProjectReference Include="..\Logzilla.AI\Logzilla.AI.csproj" />
   </ItemGroup>
 
   <!-- Reference-only material for the UI redesign: a static mockup and a template
@@ -46,6 +68,7 @@
   <ItemGroup>
     <!-- Tests exercise the owner-drawn controls' internal layout/state logic directly. -->
     <InternalsVisibleTo Include="Logzilla.App.Tests" />
+    <InternalsVisibleTo Include="Logzilla.App.E2E" />
   </ItemGroup>
 
 </Project>

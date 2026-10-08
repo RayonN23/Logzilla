@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 using System.Text.RegularExpressions;
+using Logzilla.Core.Implementation.Formats;
 using Logzilla.Core.Implementation.Logs;
 using Logzilla.Core.Logs;
 using Logzilla.Core.Query;
@@ -103,8 +105,15 @@ internal sealed class FilterEngine : IFilterEngine
             var outk = (byte[])keep.Clone();
             for (var j = 0; j < r.Matches.Count; j++)
             {
+                // A match is recorded on its entry's header line; the lines after it are
+                // counted from the entry's end, or a stack trace would use them all up.
                 var i = r.Matches[j];
-                int lo = Math.Max(0, i - s.Ctx), hi = Math.Min(n - 1, i + s.Ctx);
+                var end = i;
+                while (s.Group && end + 1 < n && f.Flag[end + 1] == 1)
+                {
+                    end++;
+                }
+                int lo = Math.Max(0, i - s.Ctx), hi = Math.Min(n - 1, end + s.Ctx);
                 for (var k = lo; k <= hi; k++)
                 {
                     outk[k] = 1;
@@ -166,9 +175,16 @@ internal sealed class FilterEngine : IFilterEngine
             byte[] b; var o = feed.Locate(i, out b);
             var len = Math.Min(f.Len[i], b.Length - o);
             var sr = f.Srcs[f.Src[i]];
-            if (s.NeedsDecode || sr.Stride == 2)
+            var enc = sr.Encoding;
+            var wide = sr.Stride == 2;
+            if (sr.IsJson && JsonView(ref b, ref o, ref len, enc, wide))
             {
-                s.ScanText(sr.Encoding.GetString(b, o, len), m);
+                enc = Encoding.UTF8;
+                wide = false;
+            }
+            if (s.NeedsDecode || wide)
+            {
+                s.ScanText(enc.GetString(b, o, len), m);
             }
             else
             {
@@ -182,6 +198,45 @@ internal sealed class FilterEngine : IFilterEngine
             }
         }
         return m.Matched;
+    }
+
+    [ThreadStatic]
+    private static byte[] JsonBuffer;
+
+    /// <summary>
+    /// Points <paramref name="b"/>/<paramref name="o"/>/<paramref name="len"/> at what a
+    /// search should see of a JSON line — its values, not its keys and punctuation (see
+    /// <see cref="JsonSearchText"/>). Returns true when the text it points at is now
+    /// UTF-8, which is always so for a UTF-16 source; false leaves the line untouched
+    /// in its own encoding.
+    /// </summary>
+    private static bool JsonView(ref byte[] b, ref int o, ref int len, Encoding enc, bool wide)
+    {
+        var src = b;
+        var so = o;
+        var sl = len;
+        if (wide)
+        {
+            src = Encoding.UTF8.GetBytes(enc.GetString(b, o, len));
+            so = 0;
+            sl = src.Length;
+        }
+        var buf = JsonBuffer;
+        var n = JsonSearchText.Project(src, so, sl, ref buf);
+        JsonBuffer = buf;
+        if (n < 0)
+        {
+            if (!wide)
+            {
+                return false;
+            }
+            n = sl;
+            buf = src;
+        }
+        b = buf;
+        o = 0;
+        len = n;
+        return wide;
     }
 
     /// <summary>Documents at least this long get a compiled copy of the query regex.
@@ -285,7 +340,12 @@ internal sealed class FilterEngine : IFilterEngine
                 }
                 var o = feed.Locate(i, out var b);
                 var len = Math.Min(f.Len[i], b.Length - o);
-                var enc = f.Srcs[f.Src[i]].Encoding;
+                var sr = f.Srcs[f.Src[i]];
+                var enc = sr.Encoding;
+                if (sr.IsJson && JsonView(ref b, ref o, ref len, enc, sr.Stride == 2))
+                {
+                    enc = Encoding.UTF8;
+                }
                 Reserve(used, enc.GetMaxCharCount(len));
                 used += enc.GetChars(b, o, len, _chars, used);
             }
@@ -349,7 +409,7 @@ internal sealed class FilterEngine : IFilterEngine
                     break;
             }
 
-            var slot = (int)((long)k * (FilterResult.Slots - 1) / Math.Max(1, cnt - 1));
+            var slot = SlotOf(k, cnt);
             var cur = r.Density[slot];
             var want = sv >= 6 ? (byte)3 : sv == 5 ? (byte)2 : sv == 4 ? (byte)1 : (byte)0;
             if (want > cur)
@@ -357,5 +417,28 @@ internal sealed class FilterEngine : IFilterEngine
                 r.Density[slot] = want;
             }
         }
+
+        // Search hits for the minimap, by their position in the view. Both lists are in
+        // line order, so one walk finds every hit's position. Pointless when every row
+        // shown is a hit: the strip would be solid and say nothing.
+        if (r.Matches.Count > 0 && r.Matches.Count < cnt)
+        {
+            r.HitSlots = new bool[FilterResult.Slots];
+            var k = 0;
+            foreach (var hit in r.Matches)
+            {
+                while (k < cnt && r.View[k] < hit)
+                {
+                    k++;
+                }
+                if (k < cnt && r.View[k] == hit)
+                {
+                    r.HitSlots[SlotOf(k, cnt)] = true;
+                }
+            }
+        }
     }
+
+    private static int SlotOf(int viewPos, int count) =>
+        (int)((long)viewPos * (FilterResult.Slots - 1) / Math.Max(1, count - 1));
 }

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Linq;
 using System.Reflection;
 using System.Text;
 using System.Windows.Forms;
@@ -130,6 +131,66 @@ public sealed class LogViewScrollTests
         Paint(view);
 
         Assert.That(view.AccessibilityObject.Value, Does.EndWith(" to " + rows + " of " + rows));
+    }
+
+    [TestCase(Keys.Down)]
+    [TestCase(Keys.Up)]
+    [TestCase(Keys.Down | Keys.Shift)]
+    [TestCase(Keys.PageDown)]
+    [TestCase(Keys.Home)]
+    public void MovementKeysBelongToTheGrid(Keys key)
+    {
+        // Otherwise Windows takes the arrows to mean "next control", and after clicking a
+        // row the first Down moved focus to the minimap. Found by the end-to-end run.
+        using var view = new LogView();
+        var isInput = (bool)typeof(LogView).GetMethod("IsInputKey", BindingFlags.NonPublic | BindingFlags.Instance)
+                                           .Invoke(view, [key]);
+
+        Assert.That(isInput, Is.True);
+    }
+
+    private static FilterResult ResultOf(IEnumerable<int> lines)
+    {
+        var res = new FilterResult { SrcCounts = new int[1] };
+        res.View.AddRange(lines);
+        return res;
+    }
+
+    [Test]
+    public void SwitchingSeveritiesBackOnKeepsThePickedRowWhereItWas()
+    {
+        // The team's report: errors only, pick one, switch the other severities back on —
+        // and the view jumped somewhere else. Here every tenth line is an "error".
+        using var view = Attached(400, "short line");
+        var doc = (LogDocument)typeof(LogView).GetField("_file", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(view);
+        var errorsOnly = ResultOf(Enumerable.Range(0, 40).Select(k => k * 10));
+        view.Attach(doc, errorsOnly);
+        view.ScrollTo(20, false);
+        view.Select(250, false);                   // the 26th error, 5 rows down the window
+        Paint(view);
+        var rowsAbove = view.ViewPosOf(250) - view.TopRow;
+        Assume.That(rowsAbove, Is.EqualTo(5));
+
+        view.Attach(doc, ResultOf(Enumerable.Range(0, 400)));   // every severity back on
+
+        Assert.That(view.Selected, Is.EqualTo(250), "Still selected.");
+        Assert.That(view.ViewPosOf(250) - view.TopRow, Is.EqualTo(rowsAbove), "And still 5 rows down the window.");
+    }
+
+    [Test]
+    public void APickedRowTheNewFilterHidesKeepsThePlaceNearIt()
+    {
+        using var view = Attached(400, "short line");
+        var doc = (LogDocument)typeof(LogView).GetField("_file", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(view);
+        view.ScrollTo(240, false);
+        view.Select(245, false);
+        Paint(view);
+
+        view.Attach(doc, ResultOf(Enumerable.Range(0, 40).Select(k => k * 10)));   // 245 is filtered out
+
+        Assert.That(doc.N, Is.EqualTo(400));
+        Assert.That(view.TopRow, Is.InRange(view.ViewPosOf(240) - 6, view.ViewPosOf(240)),
+            "The view stays around line 240, the nearest one still shown, instead of jumping.");
     }
 
     [Test]

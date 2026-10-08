@@ -183,10 +183,10 @@ internal sealed partial class MainForm
         _miCopy = Mi("Copy entry", Keys.Control | Keys.C, delegate { CopySelected(); });
         edit.DropDownItems.Add(_miCopy);
         edit.DropDownItems.Add(Mi("Copy all shown entries", Keys.Control | Keys.Shift | Keys.C, delegate { CopyShown(); }));
-        edit.DropDownItems.Add(Mi("Copy marked entries", Keys.None, delegate { CopyMarks(); }));
+        edit.DropDownItems.Add(Mi("Copy bookmarked entries", Keys.None, delegate { CopyMarks(); }));
         edit.DropDownItems.Add(new ToolStripSeparator());
-        edit.DropDownItems.Add(Mi("Mark entry", Keys.None, delegate { ToggleMark(); }));
-        edit.DropDownItems.Add(Mi("Clear all marks", Keys.None, delegate
+        edit.DropDownItems.Add(Mi("Bookmark entry", Keys.None, delegate { ToggleMark(); }));
+        edit.DropDownItems.Add(Mi("Clear all bookmarks", Keys.None, delegate
         { if (F != null) { F.Marks.Clear(); _view.Invalidate(); FillSide(); } }));
         edit.DropDownItems.Add(Mi("Reset filters", Keys.Control | Keys.R, delegate { DoReset(); }));
 
@@ -205,6 +205,9 @@ internal sealed partial class MainForm
         view.DropDownItems.Add(_miSrcCol);
         view.DropDownItems.Add(new ToolStripSeparator());
         view.DropDownItems.Add(BuildTimeMenu());
+        var ask = Mi("AI Chat", Keys.None, delegate { _sideTab = "ask"; SyncSideTabs(); FillSide(); });
+        ask.ShortcutKeyDisplayString = "Ctrl+8";   // the side-tab shortcut already handles the key
+        view.DropDownItems.Add(ask);
         view.DropDownItems.Add(Mi("Time zone of this file...", Keys.None, delegate { ZoneOfCurrentFile(); }));
         view.DropDownItems.Add(new ToolStripSeparator());
         view.DropDownItems.Add(Mi("Larger text", Keys.Control | Keys.Oemplus, delegate { Zoom(1); }));
@@ -215,6 +218,8 @@ internal sealed partial class MainForm
         _miAssoc = Mi("Set up as the log file handler...", Keys.None, delegate { DoRegister(); });
         tools.DropDownItems.Add(_miAssoc);
         tools.DropDownItems.Add(Mi("Remove file associations", Keys.None, delegate { DoUnregister(); }));
+        tools.DropDownItems.Add(new ToolStripSeparator());
+        tools.DropDownItems.Add(Mi("AI settings...", Keys.None, delegate { ShowAISettings(); }));
         tools.DropDownItems.Add(new ToolStripSeparator());
         tools.DropDownItems.Add(Mi("Save setup...", Keys.None, delegate { SaveSetup(); }));
         tools.DropDownItems.Add(Mi("Load setup...", Keys.None, delegate { LoadSetup(); }));
@@ -257,7 +262,7 @@ internal sealed partial class MainForm
         _tabs = new TabStrip();
         _tabs.Dock = DockStyle.Fill;
         _tabs.Picked += delegate (object _, TabStrip.IdxArgs a)
-        { if (a.I != _active) { _active = a.I; _view.ClearSelection(); _srcMask = -1; SyncTabs(); StartFilter(); } };
+        { if (a.I != _active) { SwitchTab(a.I); SyncTabs(); StartFilter(); } };
         _tabs.Closed += delegate (object _, TabStrip.IdxArgs a) { DoClose(a.I); };
 
         // Dock order: the last control added is docked first (outermost).
@@ -286,7 +291,7 @@ internal sealed partial class MainForm
 
         cmdLeft.Controls.Add(Divider());
 
-        _mode = new SegmentedControl { LeftLabel = "Highlight", RightLabel = "Filter to matches" };
+        _mode = new SegmentedControl { LeftLabel = "Highlight", RightLabel = "Filter to matches", Name = "SearchMode" };
         _mode.Fit();
         _mode.Margin = new Padding(0);
         _mode.AccessibleName = "Search mode: highlight matches or filter to matches";
@@ -305,13 +310,14 @@ internal sealed partial class MainForm
         };
 
         _bMerge = Btn("Merge", "Merge open files into one timeline  (Ctrl+M)", 64, delegate { DoMerge(); });
+        _bMerge.Name = "MergeButton";
         _bMerge.Margin = new Padding(0, 0, Dpi.S(Gap), 0);
         _bMerge.Enabled = false; // nothing is open yet; SyncTabs turns it on
         cmdRight.Controls.Add(_bMerge);
 
         cmdRight.Controls.Add(Divider());
 
-        _bWrap = new ToggleChip { Label = "Wrap", BackColor = Theme.BgChrome };
+        _bWrap = new ToggleChip { Label = "Wrap", BackColor = Theme.BgChrome, Name = "WrapChip" };
         _bWrap.Height = Dpi.S(Theme.ControlHeight);
         _bWrap.Fit(60);
         _bWrap.Margin = new Padding(0, 0, Dpi.S(Gap), 0);
@@ -321,6 +327,7 @@ internal sealed partial class MainForm
         cmdRight.Controls.Add(_bWrap);
 
         _bTime = BuildTimeChip();
+        _bTime.Name = "TimeChip";
         _bTime.Margin = new Padding(0, 0, Dpi.S(Gap), 0);
         cmdRight.Controls.Add(_bTime);
 
@@ -333,7 +340,7 @@ internal sealed partial class MainForm
         _bDate.Click2 += delegate { _view.ShowTime = !_view.ShowTime; _bDate.On = _view.ShowTime; _bDate.Invalidate(); _view.Invalidate(); };
         cmdRight.Controls.Add(_bDate);
 
-        _bTail = new ToggleChip { Label = "Live tail", Dot = Theme.Ok, AccentColor = Theme.Ok, BackColor = Theme.BgChrome };
+        _bTail = new ToggleChip { Label = "Live tail", Dot = Theme.Ok, BackColor = Theme.BgChrome };
         _bTail.Height = Dpi.S(Theme.ControlHeight);
         _bTail.Fit(90);
         _bTail.Margin = new Padding(0, 0, Dpi.S(Gap), 0);
@@ -397,7 +404,7 @@ internal sealed partial class MainForm
         var filterRule = HRule();
 
         // ---------- timeline ----------
-        _tl = new Timeline();
+        _tl = new Timeline { Name = "Timeline" };
         _tl.Dock = DockStyle.Top;
         _tl.RangeSelected += delegate (object _, Timeline.RangeArgs a)
         {
@@ -413,14 +420,14 @@ internal sealed partial class MainForm
         _tl.Seek += delegate (object _, Timeline.SeekArgs a) { SeekTime(a.T); };
 
         // ---------- centre ----------
-        _split = new SplitContainer();
+        _split = new SplitContainer { Name = "MainSplit" };
         _split.Dock = DockStyle.Fill;
         _split.BackColor = Theme.BgChrome;
         _split.SplitterWidth = Dpi.S(3);
         _split.Panel1.BackColor = Theme.BgData;
         _split.Panel2.BackColor = Theme.BgChrome;
 
-        _view = new LogView { Indexer = _indexer, JsonReader = _jsonReader };
+        _view = new LogView { Indexer = _indexer, JsonReader = _jsonReader, Name = "LogGrid" };
         _view.Dock = DockStyle.Fill;
         _view.Rules = _rules;
         _view.SelectionChanged += delegate
@@ -435,15 +442,15 @@ internal sealed partial class MainForm
             _mini.Invalidate();
             _tl.Invalidate();
         };
-        _view.WordPicked += delegate (object _, LogView.WordPickedEventArgs a) { AddTerm(a.Word); };
         _view.CopyEntryRequested += delegate { CopySelected(); };
+        _view.CopyFieldRequested += delegate (object _, LogView.FieldCopyEventArgs a) { CopyText(a.Value, FieldNames.Display(a.Key)); };
         _view.CopyAsJsonRequested += delegate { CopySelectedAsJson(); };
         _view.NextErrorRequested += delegate { JumpSeverity(1, 5); };
         _view.BookmarkToggleRequested += delegate { ToggleMark(); };
         _view.MouseUp += ViewMouseUp;
         _view.MouseWheel += ViewWheel;
 
-        _mini = new MiniMap();
+        _mini = new MiniMap { Name = "Minimap" };
         _mini.Dock = DockStyle.Right;
         _mini.View = _view;
         _mini.Jump += delegate (object _, MiniMap.JumpFractionEventArgs a) { _view.ScrollFraction(a.F); _mini.Invalidate(); };
@@ -452,21 +459,27 @@ internal sealed partial class MainForm
         _split.Panel1.Controls.Add(_mini);
 
         // Inspector tabs: a strip of full-word text tabs, active one underlined. All
-        // seven fit one 40px row at the panel's natural width; the strip wraps to a
-        // second row rather than hiding any of them when the splitter is dragged in.
-        var tabs2 = new FlowLayoutPanel();
+        // eight fit one 40px row at the panel's natural width; the strip wraps to a
+        // second row rather than hiding any of them when the splitter is dragged in,
+        // or larger text makes the labels wider.
+        //
+        // Sized by hand, not AutoSize: an auto-sized FlowLayoutPanel docked to the top
+        // measures itself as one unbroken row, so it never wrapped — the last tabs
+        // (Ask among them) were drawn past the panel's edge until the window grew.
+        var tabs2 = new FlowLayoutPanel { Name = "SideTabs" };
         tabs2.Dock = DockStyle.Top;
         tabs2.BackColor = Theme.BgChrome;
         tabs2.WrapContents = true;
-        tabs2.AutoSize = true;
-        tabs2.AutoSizeMode = AutoSizeMode.GrowAndShrink;
-        tabs2.MinimumSize = new Size(0, Dpi.S(Theme.TitleBarHeight));
+        tabs2.Height = Dpi.S(Theme.TitleBarHeight);
         tabs2.Padding = new Padding(Dpi.S(BarPad - 8), 0, 0, 0);
+        _sideTabStrip = tabs2;
+        tabs2.SizeChanged += delegate { FitSideTabs(); };
         foreach (var nm in SideNames)
         {
             var key = nm;
-            var b = Btn(Cap1(nm), null, 40, null);   // full word, never truncated
+            var b = Btn(SideLabel(nm), null, 40, null);   // full word, never truncated
             b.Style = FlatButton.Look.Tab;
+            b.Name = "SideTab." + nm;
             b.FitTo(40, Theme.TitleBarHeight, SideTabPadX);
             b.Margin = new Padding(0);
             b.Click += delegate { _sideTab = key; SyncSideTabs(); FillSide(); };
@@ -479,7 +492,7 @@ internal sealed partial class MainForm
         }
         var tabsRule = HRule();
 
-        _sidePanel = new BufferedPanel();
+        _sidePanel = new BufferedPanel { Name = "SidePanel" };
         _sidePanel.Dock = DockStyle.Fill;
         _sidePanel.BackColor = Theme.BgChrome;
 
@@ -487,9 +500,11 @@ internal sealed partial class MainForm
         _side.Dock = DockStyle.Fill;
         _side.Activate += SideActivate;
 
-        _entry = new TextBox();
+        _entry = new TextBox { Name = "EntryText" };
         _entry.Multiline = true; _entry.ReadOnly = true; _entry.ScrollBars = ScrollBars.Both;
         _entry.WordWrap = false;
+        // Lift the edit control's 32K default so a long payload is never cut short.
+        _entry.MaxLength = int.MaxValue;
         _entry.Dock = DockStyle.Fill; _entry.BackColor = Theme.BgChrome; _entry.ForeColor = Theme.Text2;
         _entry.Margin = new Padding(0);
         _entry.BorderStyle = BorderStyle.None; _entry.Font = Theme.MonoSmall;
@@ -500,6 +515,8 @@ internal sealed partial class MainForm
         _entryHost.Controls.Add(_entry);
         _sidePanel.Controls.Add(_side);
         _sidePanel.Controls.Add(_entryHost);
+        _sidePanel.Controls.Add(BuildAskPanel());
+        _sidePanel.Controls.Add(BuildHighlightBar());   // added last, so it docks above the list
         _split.Panel2.Controls.Add(_sidePanel);
         _split.Panel2.Controls.Add(tabsRule);
         _split.Panel2.Controls.Add(tabs2);
@@ -541,7 +558,7 @@ internal sealed partial class MainForm
             OpenMany(paths);
         };
         KeyDown += FormKeyDown;
-        FormClosing += delegate { _tailTimer.Stop(); SaveState(); };
+        FormClosing += delegate { _tailTimer.Stop(); SaveState(); CloseAssistant(); };
     }
 
     private BufferedPanel _searchHost;
@@ -559,7 +576,7 @@ internal sealed partial class MainForm
         };
         _searchHost.Paint += PaintSearchHost;
 
-        _q = new TextBox();
+        _q = new TextBox { Name = "SearchBox" };
         _q.BorderStyle = BorderStyle.None;
         _q.BackColor = Theme.BgData; _q.ForeColor = Theme.Text;
         _q.Font = Theme.MonoBody;
@@ -753,7 +770,7 @@ internal sealed partial class MainForm
     // always-visible group (which would starve the spec'd search field of room).
     private void BuildTimeGroup(FlowLayoutPanel cmdLeft)
     {
-        _tRange = new TextBox();
+        _tRange = new TextBox { Name = "TimeRange" };
         _tRange.Width = Dpi.S(170);
         _tRange.BackColor = Theme.BgData; _tRange.ForeColor = Theme.Text; _tRange.BorderStyle = BorderStyle.FixedSingle;
         _tRange.Font = Theme.MonoSmall;
@@ -805,6 +822,7 @@ internal sealed partial class MainForm
         _timeDropDown.Items.Add(new ToolStripControlHost(host) { Margin = new Padding(0), AutoSize = false, Size = host.Size });
 
         _bTimeTrigger = Btn("Time", "Filter by time range", 54, null);
+        _bTimeTrigger.Name = "TimeButton";
         _bTimeTrigger.Margin = new Padding(0);
         _bTimeTrigger.Click += delegate
         {
@@ -851,7 +869,7 @@ internal sealed partial class MainForm
             Dock = DockStyle.Fill, WrapContents = false,
             BackColor = Theme.BgChromeLow, Padding = new Padding(Dpi.S(BarPad), 0, 0, 0),
         };
-        _st1 = new Label { AutoSize = true, ForeColor = Theme.Text3, Font = Theme.MonoSmall, Margin = new Padding(0) };
+        _st1 = new Label { Name = "StatusText", AutoSize = true, ForeColor = Theme.Text3, Font = Theme.MonoSmall, Margin = new Padding(0) };
         left.Controls.Add(_st1);
 
         // Only painted while indexing or scanning; an idle empty track reads as a stray box.
@@ -881,7 +899,7 @@ internal sealed partial class MainForm
         };
         _statusDot = new Panel { Width = Dpi.S(6), Height = Dpi.S(6), BackColor = Theme.TextDim, Margin = new Padding(0, 0, Dpi.S(8), 0) };
         right.Controls.Add(_statusDot);
-        _stCount = new Label { AutoSize = true, ForeColor = Theme.Text, Font = Theme.MonoSmall, Margin = new Padding(0) };
+        _stCount = new Label { Name = "StatusCount", AutoSize = true, ForeColor = Theme.Text, Font = Theme.MonoSmall, Margin = new Padding(0) };
         right.Controls.Add(_stCount);
         _stHint = new Label { AutoSize = true, ForeColor = Theme.TextDim, Font = Theme.MonoSmall, Margin = new Padding(0) };
         right.Controls.Add(_stHint);
@@ -1069,6 +1087,21 @@ internal sealed partial class MainForm
         }
     }
 
+    /// <summary>Gives the inspector's tab strip as many rows as its width needs.</summary>
+    private void FitSideTabs()
+    {
+        var strip = _sideTabStrip;
+        if (strip == null || strip.Width <= 0)
+        {
+            return;
+        }
+        var h = Math.Max(Dpi.S(Theme.TitleBarHeight), strip.GetPreferredSize(new Size(strip.Width, 0)).Height);
+        if (strip.Height != h)
+        {
+            strip.Height = h;
+        }
+    }
+
     private void SyncSideTabs()
     {
         for (var i = 0; i < _sideTabs.Count; i++)
@@ -1076,7 +1109,21 @@ internal sealed partial class MainForm
             _sideTabs[i].Selected = SideNames[i] == _sideTab;
         }
         _entryHost.Visible = _sideTab == "detail";
-        _side.Visible = _sideTab != "detail";
+        if (_hlBar != null)
+        {
+            _hlBar.Visible = _sideTab == "colors";
+        }
+        _side.Visible = _sideTab != "detail" && _sideTab != "ask";
+        if (_ask != null)
+        {
+            var wasHidden = !_ask.Visible;
+            _ask.Visible = _sideTab == "ask";
+            if (_ask.Visible && wasHidden)
+            {
+                RefreshAsk();
+                _ask.FocusInput();
+            }
+        }
     }
 
     private void SyncTabs()

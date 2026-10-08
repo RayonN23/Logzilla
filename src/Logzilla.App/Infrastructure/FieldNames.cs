@@ -61,4 +61,35 @@ internal static class FieldNames
         }
         return k.Equals("traceid", StringComparison.OrdinalIgnoreCase) ? 2 : -1;
     }
+
+    /// <summary>
+    /// True for the field that says which thread wrote the line: ThreadId, thread,
+    /// thread_id, tid, ThreadName and the like. Following one thread shows what it did
+    /// in order, which interleaved threads otherwise hide.
+    /// </summary>
+    public static bool IsThread(string key)
+    {
+        if (string.IsNullOrEmpty(key))
+        {
+            return false;
+        }
+        var k = key.Replace("_", "", StringComparison.Ordinal).Replace(".", "", StringComparison.Ordinal).Replace("-", "", StringComparison.Ordinal);
+        return k.Equals("thread", StringComparison.OrdinalIgnoreCase) ||
+               k.Equals("threadid", StringComparison.OrdinalIgnoreCase) ||
+               k.Equals("threadname", StringComparison.OrdinalIgnoreCase) ||
+               k.Equals("tid", StringComparison.OrdinalIgnoreCase) ||
+               k.Equals("managedthreadid", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Where a field goes in a list of an entry's fields: the ids a request is
+    /// followed by, then the thread, then everything else in its own order.</summary>
+    public static int FollowRank(string key)
+    {
+        var r = CorrelationRank(key);
+        if (r >= 0)
+        {
+            return r;
+        }
+        return IsThread(key) ? 4 : 9;
+    }
 }

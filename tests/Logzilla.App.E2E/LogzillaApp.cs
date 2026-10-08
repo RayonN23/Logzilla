@@ -56,6 +56,11 @@ internal sealed class LogzillaApp : IDisposable
         {
             Assert.Ignore("End-to-end test: set LOGZILLA_E2E=1 to run it. It opens windows and uses the keyboard.");
         }
+        // On a scaled display a process that is not DPI-aware is told every window is
+        // smaller than it is, while PrintWindow renders it at its real size: pictures
+        // came out cut off and crops landed in the wrong place. Declared once, before
+        // this process looks at any window.
+        _ = SetProcessDpiAwarenessContext(PerMonitorAwareV2);
         var dataDir = Path.Combine(Path.GetTempPath(), "logzilla-e2e-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dataDir);
         if (settings != null)
@@ -75,10 +80,17 @@ internal sealed class LogzillaApp : IDisposable
 
     public static string Sample(string name) => Path.Combine(AppContext.BaseDirectory, "samples", name);
 
-    /// <summary>The control with this automation id, waiting for it to appear.</summary>
+    /// <summary>The control with this automation id, waiting for it to appear. Looks in
+    /// Logzilla's drop-downs too: those are windows of their own, not inside the main one.</summary>
     public AutomationElement Find(string automationId)
     {
-        var found = Retry.WhileNull(() => Window.FindFirstDescendant(cf => cf.ByAutomationId(automationId)), Patience).Result;
+        var pid = _app.ProcessId;
+        var found = Retry.WhileNull(() =>
+            Window.FindFirstDescendant(cf => cf.ByAutomationId(automationId)) ??
+            _automation.GetDesktop().FindAllChildren(cf => cf.ByProcessId(pid))
+                .Select(w => w.FindFirstDescendant(cf => cf.ByAutomationId(automationId)))
+                .FirstOrDefault(e => e != null),
+            Patience).Result;
         Assert.That(found, Is.Not.Null, "No control with automation id '" + automationId + "'.");
         return found;
     }
@@ -165,6 +177,14 @@ internal sealed class LogzillaApp : IDisposable
         }
     }
 
+    /// <summary>Presses keys together, such as Ctrl+Tab — only while Logzilla is in front.</summary>
+    public void Chord(params VirtualKeyShort[] keys)
+    {
+        EnsureForeground();
+        Keyboard.TypeSimultaneously(keys);
+        Wait.UntilInputIsProcessed();
+    }
+
     public void Key(VirtualKeyShort key)
     {
         EnsureForeground();
@@ -181,16 +201,26 @@ internal sealed class LogzillaApp : IDisposable
         }
     }
 
-    /// <summary>Resizes the window, through UI Automation rather than by dragging its edge.</summary>
+    /// <summary>Resizes the window, through UI Automation rather than by dragging its edge.
+    /// The size is in logical pixels, as the app's own sizes are, so a window asked for at
+    /// 1440 wide looks the same on a 150% display as on a 100% one.</summary>
     public void Resize(int width, int height)
     {
         if (Window.Patterns.Window.Pattern.WindowVisualState.Value != WindowVisualState.Normal)
         {
             Window.Patterns.Window.Pattern.SetWindowVisualState(WindowVisualState.Normal);
         }
-        Window.Patterns.Transform.Pattern.Resize(width, height);
+        var scale = GetDpiForWindow(Window.Properties.NativeWindowHandle.ValueOrDefault) / 96.0;
+        if (scale <= 0)
+        {
+            scale = 1;
+        }
+        Window.Patterns.Transform.Pattern.Resize(width * scale, height * scale);
         Wait.UntilInputIsProcessed();
     }
+
+    [DllImport("user32.dll")]
+    private static extern uint GetDpiForWindow(IntPtr hwnd);
 
     /// <summary>
     /// Saves a picture of Logzilla's window alone and attaches it to the test result.
@@ -229,7 +259,53 @@ internal sealed class LogzillaApp : IDisposable
         return file;
     }
 
+    /// <summary>
+    /// Saves Logzilla's window, or just the part covering the given controls, to
+    /// <paramref name="path"/>. Rendered by the window itself, like <see cref="Screenshot"/>,
+    /// so nothing else on the desktop can appear in it.
+    /// </summary>
+    public void SaveShot(string path, params string[] automationIds)
+    {
+        var hwnd = Window.Properties.NativeWindowHandle.ValueOrDefault;
+        Assert.That(GetWindowRect(hwnd, out var win), Is.True, "Could not read the window's position.");
+        using var full = new Bitmap(win.Right - win.Left, win.Bottom - win.Top);
+        using (var g = Graphics.FromImage(full))
+        {
+            var dc = g.GetHdc();
+            try
+            {
+                Assert.That(PrintWindow(hwnd, dc, PwRenderFullContent), Is.True, "The window would not render itself.");
+            }
+            finally
+            {
+                g.ReleaseHdc(dc);
+            }
+        }
+        var crop = new Rectangle(0, 0, full.Width, full.Height);
+        if (automationIds.Length > 0)
+        {
+            var area = Rectangle.Empty;
+            foreach (var id in automationIds)
+            {
+                var b = Find(id).BoundingRectangle;
+                var r = new Rectangle(b.X - win.Left, b.Y - win.Top, b.Width, b.Height);
+                area = area.IsEmpty ? r : Rectangle.Union(area, r);
+            }
+            crop = Rectangle.Intersect(area, crop);
+        }
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        using var part = full.Clone(crop, full.PixelFormat);
+        part.Save(path, ImageFormat.Png);
+        TestContext.AddTestAttachment(path);
+    }
+
     private const uint PwRenderFullContent = 2;
+
+    private static readonly IntPtr PerMonitorAwareV2 = new(-4);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetProcessDpiAwarenessContext(IntPtr value);
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]

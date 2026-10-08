@@ -31,8 +31,6 @@ public sealed class FieldMatch
         }
     }
 
-    public int Count => _filters.Length;
-
     public void Reset() => Array.Clear(_found);
 
     /// <summary>True when every filter holds for the lines scanned since

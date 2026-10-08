@@ -80,6 +80,21 @@ internal sealed class SegmentedControl : Control
     protected override void OnGotFocus(EventArgs e) { base.OnGotFocus(e); Invalidate(); }
     protected override void OnLostFocus(EventArgs e) { base.OnLostFocus(e); Invalidate(); }
 
+    protected override AccessibleObject CreateAccessibilityInstance() => new SwitchAccessible(this);
+
+    /// <summary>Reads out which side is chosen, and switches to the other side when a
+    /// screen reader or UI automation presses it — a plain Control offers neither.</summary>
+    private sealed class SwitchAccessible(SegmentedControl owner) : ControlAccessibleObject(owner)
+    {
+        public override string Name => owner.AccessibleName ?? owner.LeftLabel + " or " + owner.RightLabel;
+
+        public override string Value => owner.RightActive ? owner.RightLabel : owner.LeftLabel;
+
+        public override string DefaultAction => "Switch to " + (owner.RightActive ? owner.LeftLabel : owner.RightLabel);
+
+        public override void DoDefaultAction() => owner.SetRight(!owner.RightActive);
+    }
+
     private void SetRight(bool right)
     {
         if (right == RightActive)

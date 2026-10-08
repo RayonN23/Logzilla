@@ -13,6 +13,10 @@ public partial class QuerySpec
 {
     private List<string> IncS { get; } = [];
     private List<string> ExcS { get; } = [];
+
+    /// <summary>The include terms as text, lower-cased unless the search is case
+    /// sensitive — what the grid highlights.</summary>
+    public IReadOnlyList<string> IncludeTerms => IncS;
     public List<byte[]> Inc { get; } = [];
     public List<byte[]> Exc { get; } = [];
     public Regex Rx { get; set; }
@@ -28,6 +32,9 @@ public partial class QuerySpec
     public bool HasQuery => Rx != null || Inc.Count > 0 || Exc.Count > 0;
 
     public List<FieldFilter> Fields { get; } = [];
+
+    /// <summary>Longest a search regex may spend on one entry.</summary>
+    public static readonly TimeSpan RegexTimeout = TimeSpan.FromSeconds(2);
 
     [SuppressMessage("Major Code Smell", "S107", Justification = "Builder composes full filter state in one call site.")]
     [SuppressMessage("Major Code Smell", "S3776", Justification = "Parsing logic is centralized to avoid duplication.")]
@@ -52,7 +59,10 @@ public partial class QuerySpec
 
         if (regex)
         {
-            try { s.Rx = new Regex(q, cs ? RegexOptions.None : RegexOptions.IgnoreCase); }
+            // A pattern that backtracks catastrophically on one long entry would otherwise
+            // pin a core with no way to stop it — cancellation is only checked between
+            // entries. The timeout turns that into an error the search can report.
+            try { s.Rx = new Regex(q, cs ? RegexOptions.None : RegexOptions.IgnoreCase, RegexTimeout); }
             catch (ArgumentException ex)
             {
                 Debug.WriteLine("Invalid regex query: " + ex.Message);
@@ -69,7 +79,7 @@ public partial class QuerySpec
             }
 
             var cmp = cs ? v : v.ToLowerInvariant();
-            foreach (var c in cmp.Where(c => c > 127))
+            if (cmp.Any(c => c > 127))
             {
                 s.NeedsDecode = true;
             }
@@ -78,13 +88,6 @@ public partial class QuerySpec
             else { s.IncS.Add(cmp); s.Inc.Add(Encoding.UTF8.GetBytes(cmp)); }
         }
         return s;
-    }
-
-    public bool MatchText(string line)
-    {
-        var hay = Cs ? line : line.ToLowerInvariant();
-        return !IncS.Any(t => hay.IndexOf(t, StringComparison.Ordinal) < 0) &&
-               ExcS.All(t => hay.IndexOf(t, StringComparison.Ordinal) < 0);
     }
 
     public bool MatchBytes(byte[] b, int o, int len) => Inc.All(t => Contains(b, o, len, t, Cs)) && Exc.All(t => !Contains(b, o, len, t, Cs));

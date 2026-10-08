@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.Globalization;
+using System.Threading;
 using System.Windows.Forms;
 using Logzilla.App.Controls;
 using Logzilla.App.Infrastructure;
@@ -49,16 +50,34 @@ internal sealed partial class MainForm : Form
     private string _sideTab = "summary";
     private readonly List<FlatButton> _sideTabs = new();
     private FlatButton _bMarksSideTab;
+    private FlowLayoutPanel _sideTabStrip;
 
-    /// <summary>Every inspector panel, in tab order, and the order Ctrl+1..7 selects
+    /// <summary>Every inspector panel, in tab order, and the order Ctrl+1..8 selects
     /// them in. All seven have a tab of their own: hiding three of them behind an
     /// overflow menu meant the panels people reach for most — the entry detail and,
     /// after a merge, the sources — took two clicks and a guess to find.</summary>
     private static readonly string[] SideNames =
-        { "summary", "detail", "fields", "patterns", "marks", "sources", "colors" };
+        { "summary", "detail", "fields", "patterns", "marks", "sources", "colors", "ask" };
+
+    /// <summary>What each tab says. The keys above are what the code, settings and
+    /// automation ids use; the names people read are these.</summary>
+    private static string SideLabel(string key) => key switch
+    {
+        "marks" => "Bookmarks",
+        "colors" => "Highlighting",
+        "ask" => "AI Chat",
+        _ => Cap1(key),
+    };
 
     private FilterResult _res;
-    private volatile int _gen;
+
+    /// <summary>
+    /// Files still being indexed, each with its own cancellation. Touched on the UI
+    /// thread only. One shared counter used to stand in for this, so opening a second
+    /// file cancelled the first one's indexing and left it cut off at 8 MB.
+    /// </summary>
+    private readonly Dictionary<LogDocument, CancellationTokenSource> _indexing = new();
+
     private volatile int _liveGen;
     private int _progPct = -1;
     private double _t0 = double.NaN, _t1 = double.NaN;
@@ -147,24 +166,31 @@ internal sealed partial class MainForm : Form
                 _rules.Add(r);
             }
         }
-        if (_rules.Count == 0)
+        // There are no built-in highlights any more: they coloured every log whether or not
+        // anyone wanted them. Earlier versions added three and saved them as if they were
+        // the user's own, so those three are taken out once — afterwards a rule with the
+        // same text is the user's, and stays.
+        if (_cfg.Get(DefaultRulesRemovedKey, "") != "1")
         {
-            _rules.Add(NewRule("exception|traceback|stack trace", true, Theme.SevColor[5]));
-            _rules.Add(NewRule("timeout|timed out|refused|unreachable", true, Theme.SevColor[4]));
-            _rules.Add(NewRule("\\b\\d{1,3}(?:\\.\\d{1,3}){3}\\b", true, Theme.SevColor[2]));
+            RemoveOldDefaultRules(_rules);
+            _cfg.Set(DefaultRulesRemovedKey, "1");
         }
     }
 
+    private const string DefaultRulesRemovedKey = "rules.defaults-removed";
+
+    /// <summary>The highlight rules versions up to 3.0 added on first run.</summary>
+    private static readonly string[] OldDefaultRules =
+    [
+        "exception|traceback|stack trace",
+        "timeout|timed out|refused|unreachable",
+        "\\b\\d{1,3}(?:\\.\\d{1,3}){3}\\b",
+    ];
+
+    /// <summary>Takes out the highlight rules earlier versions added on first run, and
+    /// nothing else: a rule the user added or changed the text of stays.</summary>
+    internal static void RemoveOldDefaultRules(List<HighlightRule> rules) =>
+        rules.RemoveAll(r => r.IsRegex && Array.IndexOf(OldDefaultRules, r.Pattern) >= 0);
+
     private static Icon AppIcon() => AppImages.Load();
-
-    private static HighlightRule NewRule(string p, bool rx, Color c)
-    {
-        var r = new HighlightRule();
-        r.Pattern = p;
-        r.IsRegex = rx;
-        r.C = c;
-        r.On = true;
-        return r;
-    }
-
 }

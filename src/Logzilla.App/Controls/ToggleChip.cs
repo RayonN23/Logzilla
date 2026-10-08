@@ -17,7 +17,6 @@ internal sealed class ToggleChip : Control
     public string Count = "";
     public bool On;
     public Color? Dot;          // filled/hollow dot in front of the label, or null for none
-    public Color AccentColor = Theme.Accent;
     public bool Enabled2 = true; // "Enabled" is already a Control property; this is the zero-count/disabled look
     /// <summary>No border while off — for toggles that sit inside another field (.* / Aa).</summary>
     public bool BorderlessOff;
@@ -62,6 +61,31 @@ internal sealed class ToggleChip : Control
         else if (ClientRectangle.Contains(e.Location))
         {
             Click2?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    protected override AccessibleObject CreateAccessibilityInstance() => new ChipAccessible(this);
+
+    /// <summary>A chip is a toggle: screen readers and UI automation can read its label
+    /// and whether it is on, and flip it, which a plain Control does not offer.</summary>
+    private sealed class ChipAccessible(ToggleChip owner) : ControlAccessibleObject(owner)
+    {
+        public override string Name => owner.AccessibleName ?? owner.Label;
+
+        public override AccessibleRole Role => AccessibleRole.CheckButton;
+
+        public override string DefaultAction => "Toggle";
+
+        public override AccessibleStates State =>
+            base.State | (owner.On ? AccessibleStates.Checked : AccessibleStates.None)
+                       | (owner.Enabled2 ? AccessibleStates.None : AccessibleStates.Unavailable);
+
+        public override void DoDefaultAction()
+        {
+            if (owner.Enabled2)
+            {
+                owner.Click2?.Invoke(owner, EventArgs.Empty);
+            }
         }
     }
 

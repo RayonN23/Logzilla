@@ -33,14 +33,14 @@ public sealed class SideTabsTests
         return (int)f.GetRawConstantValue();
     }
 
-    private static string Cap1(string s)
+    private static string Label(string key)
     {
-        var m = MainForm.GetMethod("Cap1", BindingFlags.NonPublic | BindingFlags.Static);
-        return (string)m.Invoke(null, [s]);
+        var m = MainForm.GetMethod("SideLabel", BindingFlags.NonPublic | BindingFlags.Static);
+        return (string)m.Invoke(null, [key]);
     }
 
     private static readonly string[] Expected =
-        { "summary", "detail", "fields", "patterns", "marks", "sources", "colors" };
+        { "summary", "detail", "fields", "patterns", "marks", "sources", "colors", "ask" };
 
     [Test]
     public void EveryPanelHasATabOfItsOwn()
@@ -89,7 +89,7 @@ public sealed class SideTabsTests
     {
         var strip = SideNames().Sum(TabWidth) + Dpi.S(12 - 8); // the strip's own left inset
         Assert.That(strip, Is.LessThanOrEqualTo(Dpi.S(Theme.InspectorWidth)),
-            "The seven tabs no longer fit one row; widen the inspector or tighten SideTabPadX.");
+            "The tabs no longer fit one row; widen the inspector or tighten SideTabPadX.");
     }
 
     [Test]
@@ -99,14 +99,41 @@ public sealed class SideTabsTests
         // sized from the measured label rather than a fixed column.
         foreach (var name in SideNames())
         {
-            var label = Dpi.Text(Cap1(name), Theme.UiBody).Width;
+            var label = Dpi.Text(Label(name), Theme.UiBody).Width;
             Assert.That(TabWidth(name), Is.GreaterThanOrEqualTo(label), name);
+        }
+    }
+
+    [Test]
+    public void ANarrowInspectorWrapsTheTabsInsteadOfCuttingOffAsk()
+    {
+        // Measured the way MainForm.FitSideTabs measures the strip: its preferred size
+        // for the width it actually has. Auto-sizing asked for one unbroken row instead,
+        // which put the last tabs beyond the panel's right edge.
+        using var strip = new System.Windows.Forms.FlowLayoutPanel { WrapContents = true };
+        foreach (var name in SideNames())
+        {
+            var b = new FlatButton { Text = Label(name), Style = FlatButton.Look.Tab, Margin = new System.Windows.Forms.Padding(0) };
+            b.FitTo(40, Theme.TitleBarHeight, SideTabPadX());
+            strip.Controls.Add(b);
+        }
+        var oneRow = Dpi.S(Theme.TitleBarHeight);
+        strip.Width = SideNames().Sum(TabWidth) / 2;
+
+        strip.Height = strip.GetPreferredSize(new System.Drawing.Size(strip.Width, 0)).Height;
+        strip.PerformLayout();
+
+        Assert.That(strip.Height, Is.GreaterThan(oneRow), "Half the width needs a second row.");
+        foreach (System.Windows.Forms.Control tab in strip.Controls)
+        {
+            Assert.That(tab.Right, Is.LessThanOrEqualTo(strip.Width), tab.Text + " runs past the edge");
+            Assert.That(tab.Bottom, Is.LessThanOrEqualTo(strip.Height), tab.Text + " is below the strip");
         }
     }
 
     private static int TabWidth(string name)
     {
-        var b = new FlatButton { Text = Cap1(name), Style = FlatButton.Look.Tab };
+        var b = new FlatButton { Text = Label(name), Style = FlatButton.Look.Tab };
         b.FitTo(40, Theme.TitleBarHeight, SideTabPadX());
         return b.Width;
     }

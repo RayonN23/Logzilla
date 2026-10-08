@@ -29,8 +29,7 @@ internal static class LevelScan
 
     public static byte Scan(byte[] b, int off, int len)
     {
-        int a, z;
-        return Scan(b, off, len, out a, out z);
+        return Scan(b, off, len, out _, out _);
     }
 
     // Scans the head of a line for a severity word standing on its own.
@@ -48,12 +47,12 @@ internal static class LevelScan
                 for (var w = 0; w < Words.Length; w++)
                 {
                     var s = Words[w];
-                    if ((byte)(s[0] + 32) != c) 
+                    if ((byte)(s[0] + 32) != c)
                     {
                         continue;
                     }
                     var n = s.Length;
-                    if (i + n > off + len) 
+                    if (i + n > off + len)
                     {
                         continue;
                     }
@@ -63,12 +62,12 @@ internal static class LevelScan
                     {
                         if (AsciiTable.ToLowerAscii(b[i + k]) != (byte)(s[k] + 32)) { ok = false; break; }
                     }
-                    if (!ok) 
+                    if (!ok)
                     {
                         continue;
                     }
                     var after = i + n;
-                    if (after < off + len && AsciiTable.IsWord(b[after])) 
+                    if (after < off + len && AsciiTable.IsWord(b[after]))
                     {
                         continue;
                     }

@@ -32,7 +32,6 @@ internal static class Theme
     //  Lines
     // ─────────────────────────────────────────────────────────────────────
     public static Color Line              { get; private set; } = Hex(0x1C222B);
-    public static Color LineSoft          { get; private set; } = Hex(0x1A1F27);
     public static Color LineControl       { get; private set; } = Hex(0x222932);
     public static Color LineControlStrong { get; private set; } = Hex(0x2E3744);
     public static Color LineLeader        { get; private set; } = Hex(0x1B212A);
@@ -95,8 +94,6 @@ internal static class Theme
     // ─────────────────────────────────────────────────────────────────────
     public static Color MatchBg      { get; private set; } = Alpha(Hex(0xF0B341), 0.22);
     public static Color MatchText    { get; private set; } = Hex(0xF6D48F);
-    public static Color MatchCurBg   { get; private set; } = Alpha(Hex(0xF0B341), 0.85);
-    public static Color MatchCurText { get; private set; } = Hex(0x11151A);
 
     public static Color Ok { get; private set; } = Hex(0x8FD694); // live-tail indicator
 
@@ -111,7 +108,7 @@ internal static class Theme
         }
         BgData = BgChrome = BgChromeLow = SystemColors.Window;
         BgRaised = BgControl = BgChipOn = BgRowHover = SystemColors.Control;
-        Line = LineSoft = LineControl = LineControlStrong = LineLeader = SystemColors.ControlDark;
+        Line = LineControl = LineControlStrong = LineLeader = SystemColors.ControlDark;
         Text = Text2 = Text3 = TextBright = SystemColors.WindowText;
         TextDim = TextPrefix = SystemColors.GrayText;
         Accent = AccentEdge = SystemColors.Highlight;
@@ -206,29 +203,25 @@ internal static class Theme
     public const int FilterBarHeight  = 44;
     public const int TimelineHeight   = 96;
     public const int StatusBarHeight  = 28;
-    public const int InspectorWidth   = 380;
+    public const int InspectorWidth   = 440;  // the eight tabs (Highlighting, Bookmarks, AI Chat …) on one row
 
     public const int RowHeight        = 20;
-    public const int ColumnHeadHeight = 26;
     public const int DateBandHeight   = 20;
 
     // Log row columns. Fixed, never auto — the point is that a blank INFO level
     // tag never shifts the message column.
     public const int ColGutter         = 46;  // line number, right-aligned
     public const int ColSpine          = 3;   // severity spine, transparent for INFO
-    public const int ColTime           = 100;
     public const int ColLevel          = 46;
     public const int ColMessageRightPad = 16;
     public const int MinimapWidth      = 11;
 
     public const int TimelineLabelHeight = 16;
     public const int TimelineChartHeight = 48;
-    public const int TimelineAxisHeight  = 16;
 
     public const int RadiusSmall  = 4;
     public const int RadiusChip   = 6;
     public const int RadiusField  = 7;
-    public const int RadiusWindow = 10;
 
     public const int ChipHeight    = 26;
     public const int ControlHeight = 30;

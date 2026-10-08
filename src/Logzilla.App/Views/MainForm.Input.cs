@@ -35,8 +35,7 @@ internal sealed partial class MainForm : Form
         if (e.Control && e.KeyCode == Keys.Tab && _docs.Count > 1)
         {
             var step = e.Shift ? -1 : 1;
-            _active = (_active + step + _docs.Count) % _docs.Count;
-            _view.ClearSelection();
+            SwitchTab((_active + step + _docs.Count) % _docs.Count);
             SyncTabs();
             StartFilter();
             e.Handled = true;
@@ -56,9 +55,9 @@ internal sealed partial class MainForm : Form
             }
         }
 
-        // The time-range box is a text box too: Home, End and the arrows belong to
-        // whoever is editing it, not to the grid behind it.
-        var typing = _q.Focused || _ctx.Focused || (_tRange != null && _tRange.Focused);
+        // Any box being typed into — search, time range, context, the Ask question —
+        // owns its letters, Enter, Home, End and the arrows, not the grid behind it.
+        var typing = _q.Focused || _ctx.Focused || EditingBox() != null;
         if (e.KeyCode == Keys.F5) { e.Handled = true; TailPoll(); return; }
         if (typing)
         {
@@ -71,6 +70,7 @@ internal sealed partial class MainForm : Form
         switch (e.KeyCode)
         {
             case Keys.Oem2: _q.Focus(); _q.SelectAll(); e.Handled = true; break;
+            case Keys.Escape: if (_view.Collapse()) { e.Handled = true; } break;
             case Keys.Enter: JumpMatch(e.Shift ? -1 : 1); e.Handled = true; break;
             case Keys.E: JumpSeverity(e.Shift ? -1 : 1, 5); e.Handled = true; break;
             case Keys.M: ToggleMark(); e.Handled = true; break;
@@ -120,22 +120,53 @@ internal sealed partial class MainForm : Form
     /// </summary>
     private void SelectAllEntries()
     {
-        if (_q.Focused)
-        {
-            _q.SelectAll();
-            return;
-        }
-        if (_tRange.Focused)
-        {
-            _tRange.SelectAll();
-            return;
-        }
         if (_ctx.Focused)
         {
+            return;
+        }
+        if (EditingBox() is { } box)
+        {
+            box.SelectAll();
             return;
         }
         _view.SelectAll();
         _mini.Invalidate();
         UpdateStatus();
+    }
+
+    /// <summary>
+    /// The text box being typed into, if the focus is in one, however deeply it sits —
+    /// the Ask question box lives inside the side panel, not on the form. Found by
+    /// following the focus rather than by a list of known boxes, so a box added later
+    /// cannot have its keystrokes taken as grid shortcuts again.
+    /// </summary>
+    private TextBoxBase EditingBox() => FocusedTextBox() is { ReadOnly: false } box ? box : null;
+
+    private TextBoxBase FocusedTextBox()
+    {
+        Control c = ActiveControl;
+        while (c is ContainerControl { ActiveControl: { } inner })
+        {
+            c = inner;
+        }
+        // A plain panel is not a ContainerControl, so finish the walk by focus.
+        while (c is { Focused: false, ContainsFocus: true })
+        {
+            Control next = null;
+            foreach (Control child in c.Controls)
+            {
+                if (child.ContainsFocus)
+                {
+                    next = child;
+                    break;
+                }
+            }
+            if (next == null)
+            {
+                break;
+            }
+            c = next;
+        }
+        return c is TextBoxBase { Focused: true } box ? box : null;
     }
 }

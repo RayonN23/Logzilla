@@ -172,12 +172,22 @@ public sealed class LogViewTests
     }
 
     [Test]
-    public void OnePathologicalLineCannotFillTheWholeViewport()
+    public void ALongMessageWrapsInFull()
     {
-        // Clip() caps a message at ~4000 characters; at a very narrow width that
-        // would still be hundreds of rows without the wrap-line cap.
-        var segs = WrapSegments(new string('x', 4000), 100, 8f);
-        Assert.That(segs, Has.Count.LessThanOrEqualTo(40));
+        // With Wrap on a row used to stop at 40 lines, cutting long messages short. It
+        // now takes every line it needs; a row taller than the window scrolls instead.
+        var text = new string('x', 4000);
+        var segs = WrapSegments(text, 100, 8f);
+
+        Assert.That(segs.Sum(s => s.Len), Is.EqualTo(text.Length), "Every character is on some line.");
+    }
+
+    [Test]
+    public void ARunawayLineStillHasAWrapLimit()
+    {
+        var segs = WrapSegments(new string('x', 2_000_000), 100, 8f);
+
+        Assert.That(segs, Has.Count.LessThanOrEqualTo(5000));
     }
 
     [Test]
@@ -249,11 +259,19 @@ public sealed class LogViewTests
     }
 
     [Test]
-    public void OneEntryCannotProduceUnboundedLayout()
+    public void ALongPayloadIsLaidOutInFull()
     {
-        var lines = WrapText(string.Join("\n", Enumerable.Repeat("line", 5000)), 4000);
+        var lines = WrapText(string.Join("\n", Enumerable.Repeat("<item>line</item>", 5000)), 4000);
 
-        Assert.That(lines, Has.Count.LessThanOrEqualTo(400));
+        Assert.That(lines, Has.Count.EqualTo(5000), "An expanded row shows the whole entry, not the first screenful.");
+    }
+
+    [Test]
+    public void ARunawayEntryStillCannotProduceUnboundedLayout()
+    {
+        var lines = WrapText(string.Join("\n", Enumerable.Repeat("x", 300_000)), 4000);
+
+        Assert.That(lines, Has.Count.LessThanOrEqualTo(200_000));
     }
 
     [Test]
