@@ -186,6 +186,23 @@ internal sealed class AISettingsDialog : Form
         ShowIcon = false;
     }
 
+    /// <summary>Keeps the dialog open on Save while an endpoint it would store is unsafe.</summary>
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        base.OnFormClosing(e);
+        if (DialogResult != DialogResult.OK)
+        {
+            return;
+        }
+        var result = Result;
+        var problem = EndpointCheck.Problem(result.AnthropicEndpoint) ?? EndpointCheck.Problem(result.OpenAIEndpoint);
+        if (problem != null)
+        {
+            MessageBox.Show(this, problem, "AI settings", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            e.Cancel = true;
+        }
+    }
+
     /// <summary>What was chosen. Only meaningful after the dialog returns OK.</summary>
     public AISettings Result => new()
     {

@@ -34,6 +34,9 @@ internal sealed partial class MainForm
         // The filters themselves are never changed in place (FieldFilterList replaces
         // them), so the scan thread can share them with the UI.
         s.Fields.AddRange(_fieldFilters);
+        // A pattern that does not compile searches for nothing, so every entry shows.
+        // Say so: a half-typed "(" otherwise looked like a search that matched it all.
+        var badRegex = _regex && s.Rx == null && _q.Text.Trim().Length > 0;
         _view.Query = s;
         UpdateResetBadge();
 
@@ -92,7 +95,8 @@ internal sealed partial class MainForm
                     {
                         return;
                     }
-                    _progPct = -1; _progHost.Invalidate(); _st3.Text = "";
+                    _progPct = -1; _progHost.Invalidate();
+                    _st3.Text = badRegex ? "Not a valid regular expression; nothing is searched for" : "";
                     _res = done2;
                     _view.Attach(target, done2);
                     _tl.File = target; _tl.Res = done2; _tl.T0 = _t0; _tl.T1 = _t1; _tl.View = _view; _tl.Invalidate();
@@ -242,6 +246,10 @@ internal sealed partial class MainForm
         if (_res == null || _q.Text.Length == 0)
         {
             _hits.Text = "";
+        }
+        else if (_regex && _view.Query is { Rx: null } && _q.Text.Trim().Length > 0)
+        {
+            _hits.Text = "invalid regex";
         }
         else
         {

@@ -42,7 +42,15 @@ internal static class CopilotCli
             {
                 try
                 {
-                    var candidate = Path.Combine(dir.Trim().Trim('"'), name);
+                    // A relative entry (".", "bin") resolves against the working folder,
+                    // which is wherever the opened log lives: a copilot.exe planted beside
+                    // a downloaded log must not be the one that runs.
+                    var folder = dir.Trim().Trim('"');
+                    if (!Path.IsPathFullyQualified(folder))
+                    {
+                        continue;
+                    }
+                    var candidate = Path.Combine(folder, name);
                     if (File.Exists(candidate))
                     {
                         return candidate;

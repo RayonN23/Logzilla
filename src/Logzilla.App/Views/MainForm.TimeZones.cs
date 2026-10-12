@@ -290,7 +290,7 @@ internal sealed partial class MainForm
         {
             return;
         }
-        if (_indexing.Count > 0)
+        if (_indexing.Count > 0 || _tailing != null)
         {
             Info("Wait for indexing to finish, then set the time zone.");
             return;

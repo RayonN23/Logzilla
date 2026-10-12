@@ -1,5 +1,34 @@
 # What's new in Logzilla
 
+## 3.1.1
+
+### Security
+- **A log could change your AI settings.** Right-clicking a value in an expanded entry and choosing **Highlight** saved it to the settings file as it was. A value with a line break in it, which anyone writing to the log can plant, put a line of its own into that file, and the next start read it as a real setting. For example, it could point your OpenAI or Claude endpoint at someone else's server, so your API key and the log excerpts you asked about went there. Line breaks can no longer get into the settings file, and an endpoint that is not https is refused even if it does
+- **Parts of hidden values could reach the AI.** The assistant's tools shortened long lines (300 characters in lists, 3,000 in whole entries) before hiding personal data. A token or email address cut in two no longer looked like one, so the half before the cut went out unhidden, such as the payload of a sign-in token or the start of an address. Values are now hidden first and shortened after
+- **Your API key could be sent unencrypted.** **Tools › AI settings** accepted any endpoint, including `http://` ones, which send your key and log excerpts where anyone on the network can read them. Endpoints must now use `https://`. Plain `http://` is still allowed for `localhost`, where local gateways run. An endpoint set by your organisation's policy is unchanged
+- **The AI could keep your computer busy for hours.** The assistant chooses its own searches, and a log can try to steer it. A search pattern that is slow on every line kept a processor core busy until Logzilla closed, with no way to stop it. Each search the assistant runs now stops after 60 seconds and asks it to narrow the search
+- Smaller hardening: Sign in with GitHub opens only an `https://` web page, never another kind of address GitHub's reply might contain. Logzilla no longer looks for the Copilot CLI in folders named relative to the current folder, which is often the folder of the log you opened. The uninstaller starts Windows' own `cmd.exe` by its full path
+
+### Fixed
+- **Tools › Open settings folder** did nothing. It now opens the folder in Explorer
+- **Merging a file that was still loading** quietly left out every line after the point loading had reached, and miscounted its lines. Merge now asks you to wait until loading finishes
+- **A regular expression that is not valid** (a half-typed `(`, say) searched for nothing and showed every entry under a red "no hits", as if everything had matched. The hit count now says **invalid regex** and the status bar explains why
+- **Messages in the status bar** were cut off under the line counts on the right, among them the message for a search that took too long. They now stop before the counts with "…" and show in full when you point at them
+- **The hit count** wrapped onto a hidden second line when it was long ("1,234,567 hits" showed as "1,234,567")
+- **On a window narrower than about 1,000 pixels**, the Merge, Wrap and other buttons were drawn on top of the **Highlight / Filter to matches** switch. Merge, which is also **File › Merge** (Ctrl+M), now steps aside when there is no room, and the switch stays clear
+- **Live tail after a log rotation:** when a followed file was emptied and started again, a selected line pointed at a different line than before, and some rows dimmed the wrong part of their text. Both are now reset along with the file
+- **Load setup** stopped partway through on a value it could not read, after it had already cleared your highlights and field filters. It now skips that one line and loads the rest
+
+### Faster
+- **Live tail no longer freezes the window.** New lines were read on the window's own thread. A burst of output, or a rotated file being read again from the start, froze Logzilla until it finished. New lines are now read in the background, like opening a file
+- **Long lines draw faster.** Each row on screen handed its whole message, up to 100,000 characters, to Windows to draw, on every repaint and every mouse movement, although only the part that fits on screen can show. Now only that part is drawn. Logs with large payloads or long JSON lines scroll and respond to the mouse more smoothly
+- **Changing a regular-expression or field-filter search stops the previous one sooner.** An outdated search used to run for up to 65,536 more lines before noticing it had been replaced. It now checks every 4,096 lines, so typing a pattern one character at a time no longer leaves earlier searches competing for the processor
+- **JSON logs index with fewer memory allocations.** Reading each line's level used to create three temporary objects per line, about 30 million for a 10-million-line log. It now reads the level in place
+
+### Known issues
+- On a narrow window, the **Context** stepper and **Time** button (and Merge, see above) are not shown, and nothing else offers them. They were already hidden under other buttons before this change
+- The uninstaller always removes the default install folder. A copy installed somewhere else with `/dir=` is left on disk
+
 ## 3.1.0
 
 ### New

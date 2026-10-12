@@ -102,6 +102,31 @@ public class JsonLogTests
     [TestCase("60", 6)]
     public void MapsNumericLevels(string value, int expected) => Assert.That(JsonLog.Level(value), Is.EqualTo((byte)expected));
 
+    /// <summary>The indexer reads the level without building a string; it must read the
+    /// same level the string-based path did, for every shape a level value comes in.</summary>
+    [TestCase("{\"@l\":\"Warning\"}")]
+    [TestCase("{\"level\": \"error\" , \"x\":1}")]
+    [TestCase("{\"level\":50}")]
+    [TestCase("{\"level\":  30 }")]
+    [TestCase("{\"level\":0}")]
+    [TestCase("{\"level\":\"\"}")]
+    [TestCase("{\"level\":\"  info  \"}")]
+    [TestCase("{\"level\":\"\\\"fatal\\\"\"}")]
+    [TestCase("{\"level\":\"VeryLongLevelNameThatGoesOnAndOnPastTheLimit\"}")]
+    [TestCase("{\"level\":\"12345678901234567890123456789\"}")]
+    [TestCase("{\"level\":\"crit")]
+    [TestCase("{\"level\":\"érror\"}")]
+    [TestCase("{\"level\":null}")]
+    [TestCase("{\"level\":true}")]
+    public void ReadingTheLevelInPlaceAgreesWithReadingItAsText(string json)
+    {
+        var b = Encoding.UTF8.GetBytes(json);
+        var at = JsonLog.Find(b, 0, b.Length, json.Contains("@l") ? "@l" : "level");
+
+        Assert.That(at, Is.GreaterThan(0));
+        Assert.That(JsonLog.LevelAt(b, at, b.Length, 24), Is.EqualTo(JsonLog.Level(JsonLog.Scalar(b, at, b.Length, 24))));
+    }
+
     [Test]
     public void FindLocatesAKeyInRawBytes()
     {

@@ -14,6 +14,11 @@ internal sealed class FilterEngine : IFilterEngine
     /// <summary>Lines between cancellation checks and progress reports.</summary>
     private const int PollStride = 1 << 16;
 
+    /// <summary>The same, while a regex or field filter decodes every line. Each line
+    /// then costs microseconds to milliseconds rather than nanoseconds, and a scan the
+    /// user has already typed past kept a core busy for tens of thousands of lines.</summary>
+    private const int SlowPollStride = 1 << 12;
+
     public FilterResult Run(LogDocument f, QuerySpec s, Func<bool> cancelled, Action<int, int> progress)
     {
         ArgumentNullException.ThrowIfNull(f);
@@ -28,6 +33,7 @@ internal sealed class FilterEngine : IFilterEngine
         var match = s.NewMatch();
         var rx = s.Rx == null ? null : new RegexScan(ScanRegex(s.Rx, n));
         var fields = s.Fields.Count == 0 ? null : new FieldScanState(s.Fields);
+        var stride = rx != null || fields != null ? SlowPollStride : PollStride;
 
         using (var feed = new LineReader(f, 1 << 22))
         {
@@ -40,7 +46,7 @@ internal sealed class FilterEngine : IFilterEngine
             {
                 if (i >= nextPoll)
                 {
-                    nextPoll = i + PollStride;
+                    nextPoll = i + stride;
                     if (cancelled != null && cancelled())
                     {
                         return null;

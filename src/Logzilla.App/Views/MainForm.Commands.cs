@@ -341,10 +341,15 @@ internal sealed partial class MainForm
                     {
                         _q.Text = v;
                     }
+                    // A line that does not parse is skipped rather than allowed to stop the
+                    // load half way, with the highlights and field filters already cleared.
                     else if (k == "mask")
-{
-    _levelMask = int.Parse(v, CultureInfo.InvariantCulture);
-}
+                    {
+                        if (int.TryParse(v, NumberStyles.Integer, CultureInfo.InvariantCulture, out var mask))
+                        {
+                            _levelMask = mask & 0x7F;
+                        }
+                    }
                     else if (k == "regex")
 {
     _regex = v == "1";
@@ -356,14 +361,14 @@ internal sealed partial class MainForm
                     else if (k == "rule")
                     {
                         var parts = v.Split(Separator, 4);
-                        if (parts.Length < 4)
+                        if (parts.Length < 4 || !int.TryParse(parts[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out var argb))
                         {
                             continue;
                         }
                         var r = new HighlightRule();
                         r.On = parts[0] == "1";
                         r.IsRegex = parts[1] == "1";
-                        r.C = Color.FromArgb(int.Parse(parts[2], CultureInfo.InvariantCulture));
+                        r.C = Color.FromArgb(argb);
                         r.Pattern = parts[3];
                         _rules.Add(r);
                     }

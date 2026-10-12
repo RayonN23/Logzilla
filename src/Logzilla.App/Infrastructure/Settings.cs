@@ -59,12 +59,21 @@ internal sealed class Settings
             var sb = new StringBuilder();
             foreach (var kv in _v)
             {
-                sb.AppendLine(kv.Key + "=" + kv.Value);
+                sb.AppendLine(OneLine(kv.Key).Replace("=", "", StringComparison.Ordinal) + "=" + OneLine(kv.Value));
             }
             File.WriteAllText(Paths.Settings, sb.ToString());
         }
         catch (Exception ex) { IgnoreNonCritical(ex, "Save settings"); }
     }
+
+    /// <summary>
+    /// A value as it may go into the file: one line. Some values come from log content
+    /// (a highlight picked from a field value), and a line break in one would start a
+    /// line of its own on the next load — a log could then set any key it liked, such as
+    /// the endpoint an API key is sent to.
+    /// </summary>
+    internal static string OneLine(string s) =>
+        s == null || s.IndexOfAny(['\r', '\n']) < 0 ? s ?? "" : s.Replace("\r\n", " ", StringComparison.Ordinal).Replace('\r', ' ').Replace('\n', ' ');
 
     public static List<string> LoadRecent()
     {

@@ -25,7 +25,10 @@ public static class PendingDelete
         // ping supplies the delay: it is present on every Windows install, whereas
         // timeout.exe fails when there is no console to read from.
         var command = $"/c ping 127.0.0.1 -n 4 > nul & rmdir /s /q \"{directory}\"";
-        var startInfo = new ProcessStartInfo("cmd.exe", command)
+        // By full path: a bare "cmd.exe" is looked for in the application's own folder
+        // first, which is the very folder being removed.
+        var cmd = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "cmd.exe");
+        var startInfo = new ProcessStartInfo(cmd, command)
         {
             CreateNoWindow = true,
             UseShellExecute = false,

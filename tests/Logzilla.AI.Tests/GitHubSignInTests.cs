@@ -99,6 +99,21 @@ public sealed class GitHubSignInTests
         Assert.That(ex?.Message, Does.Contain("Device Flow"));
     }
 
+    // The address is handed to the shell to open, so it must be a web page: a file path
+    // or another scheme would run whatever it named.
+    [TestCase("file:///C:/Windows/System32/calc.exe")]
+    [TestCase("http://github.com/login/device")]
+    [TestCase("C:\\\\Windows\\\\System32\\\\calc.exe")]
+    [TestCase("")]
+    public void AnAddressThatIsNotAnHttpsPageIsRefused(string address)
+    {
+        var reply = "{\"device_code\":\"d\",\"user_code\":\"U\",\"verification_uri\":\"" + address + "\"}";
+        var signIn = new GitHubSignIn(new HttpClient(new ScriptedGitHub(reply)), "Iv1.test");
+
+        var ex = Assert.ThrowsAsync<GitHubSignInException>(() => signIn.StartAsync("", CancellationToken.None));
+        Assert.That(ex?.Message, Is.EqualTo("GitHub sent an unexpected sign-in address."));
+    }
+
     [Test]
     public void AnUnknownAppIdIsExplained()
     {

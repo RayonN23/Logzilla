@@ -466,7 +466,7 @@ internal sealed class LogIndexer : ILogIndexer
             }
             if (lp >= 0)
             {
-                sev = JsonLog.Level(JsonLog.Scalar(src, lp, so + hn, 24));
+                sev = JsonLog.LevelAt(src, lp, so + hn, 24);
             }
             // CLEF omits the level entirely for Information.
             if (sev == 0 && own)

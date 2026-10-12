@@ -224,6 +224,42 @@ public sealed class LogToolsTests
         Assert.That(tools.SearchLog(limit: 100).Length, Is.LessThanOrEqualTo(LogTools.MaxOutputChars + 100));
     }
 
+    // A token and an address that straddle where a listed line is cut (MaxLineChars) and
+    // where an entry is cut (MaxEntryChars). Cut first and redacted after, neither looked
+    // like what it was any more, and the half before the cut went to the model as it was.
+    private const string Jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJzZWNyZXQtdXNlciJ9.c2lnbmF0dXJlLXNpZ25hdHVyZQ";
+
+    [TestCase(LogTools.MaxLineChars)]
+    [TestCase(LogTools.MaxEntryChars)]
+    public void AValueCutShortIsStillRedacted(int cut)
+    {
+        // The cut falls 18 characters into the token's payload, and 16 into the address.
+        using var log = new TestLog(
+            "2026-03-01 08:00:00.000 ERROR " + new string('x', cut - 40) + " " + Jwt + "\n" +
+            "2026-03-01 08:00:01.000 ERROR " + new string('x', cut - 17) + " carol.private@example.com\n");
+        var tools = new LogTools(log, log.Json, new Redactor());
+
+        var listed = tools.SearchLog("ERROR");
+        var read = tools.GetEntries(1, 0, 1);
+
+        foreach (var text in new[] { listed, read })
+        {
+            Assert.That(text, Does.Not.Contain("eyJzdWIi"), "The token's payload must not leave, whole or in part.");
+            Assert.That(text, Does.Not.Contain("carol"), "Nor the start of an address that was cut off.");
+        }
+    }
+
+    [Test]
+    public void ASearchThatRunsTooLongIsStoppedAndSaysSo()
+    {
+        var tools = new LogTools(_log, _log.Json, new Redactor()) { ScanBudget = TimeSpan.Zero };
+
+        var text = tools.SearchLog("(a+)+b", regex: true);
+
+        Assert.That(text, Does.Contain("The search was stopped"));
+        Assert.That(text, Does.Contain("Narrow it"));
+    }
+
     private sealed class EmptyContext : ILogContext
     {
         public Core.Logs.LogDocument Document => null;

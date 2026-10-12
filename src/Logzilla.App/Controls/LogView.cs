@@ -952,6 +952,20 @@ internal sealed partial class LogView : Control
         return _expandText.Text;
     }
 
+    /// <summary>
+    /// The document's lines were read again from the top — a followed file was truncated
+    /// or rotated — so every line number now names a different line. What was cached
+    /// about the old ones is dropped, and so is a selection that pointed at one of them.
+    /// </summary>
+    public void ForgetLines()
+    {
+        _prefixCache.Clear();
+        _maxMsgChars = 0;
+        Selected = -1;
+        _anchor = -1;
+        ForgetExpansion();
+    }
+
     private void ForgetExpansion()
     {
         _expandCache = (-2, -1, -1, -1);
@@ -1594,8 +1608,21 @@ internal sealed partial class LogView : Control
         DrawHighlightBackdrops(g, text, msgRect, ox);
 
         g.SetClip(msgRect);
-        DrawMessageRun(g, text, msgColor, prefixEnd, ox, y);
+        DrawMessageRun(g, VisiblePart(text, msgRect.Right - ox, prefixEnd), msgColor, prefixEnd, ox, y);
         g.ResetClip();
+    }
+
+    /// <summary>
+    /// The start of <paramref name="text"/> up to the column that reaches
+    /// <paramref name="width"/> pixels from its origin, plus a little slack. The rest
+    /// would be clipped anyway, but GDI still lays out every character it is handed:
+    /// a row holding a 100,000-character payload cost that on every paint and hover.
+    /// The cut never falls inside the dimmed prefix, so the row is coloured the same.
+    /// </summary>
+    private string VisiblePart(string text, int width, int prefixEnd)
+    {
+        var keep = Math.Max((int)Math.Ceiling(Math.Max(0, width) / Math.Max(1f, _cw)) + 8, prefixEnd + 1);
+        return text.Length > keep ? text[..keep] : text;
     }
 
     /// <summary>Draws one line of message text, dimming a logger/namespace prefix when

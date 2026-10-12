@@ -141,8 +141,8 @@ internal sealed partial class MainForm
         p = id switch
         {
             "copilot" => CopilotReady(out var cli) ? new CopilotProvider(Secret("copilot"), cli) : null,
-            "anthropic" => new AnthropicProvider(Secret("anthropic"), _aiPolicy.AnthropicEndpoint ?? NullIfEmpty(_cfg.Get("ai.endpoint.anthropic", ""))),
-            _ => new OpenAIProvider(Secret("openai"), _aiPolicy.OpenAIEndpoint ?? NullIfEmpty(_cfg.Get("ai.endpoint.openai", ""))),
+            "anthropic" => new AnthropicProvider(Secret("anthropic"), _aiPolicy.AnthropicEndpoint ?? UserEndpoint("anthropic")),
+            _ => new OpenAIProvider(Secret("openai"), _aiPolicy.OpenAIEndpoint ?? UserEndpoint("openai")),
         };
         if (p != null)
         {
@@ -152,6 +152,17 @@ internal sealed partial class MainForm
     }
 
     private static string NullIfEmpty(string s) => string.IsNullOrWhiteSpace(s) ? null : s;
+
+    /// <summary>The endpoint the user set for a provider, refused if the key would not
+    /// travel encrypted. Checked here as well as in the settings dialog, because the
+    /// settings file can be edited by hand, and earlier versions let a crafted log
+    /// write lines into it.</summary>
+    private string UserEndpoint(string providerId)
+    {
+        var endpoint = NullIfEmpty(_cfg.Get("ai.endpoint." + providerId, ""));
+        var problem = EndpointCheck.Problem(endpoint);
+        return problem == null ? endpoint?.Trim() : throw new InvalidOperationException(problem + " Change it in Tools › AI settings.");
+    }
 
     // ── Sign in with GitHub ──────────────────────────────────────────
 

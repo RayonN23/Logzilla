@@ -190,6 +190,15 @@ internal sealed partial class MainForm : Form
         {
             parts = parts.GetRange(0, 12);
         }
+        // A merge copies each file's lines as they stand. One still loading would be cut
+        // off where its indexing had got to, and its line count — shared with the merged
+        // view — would be counted by two threads at once.
+        var loading = parts.Find(d => _indexing.ContainsKey(d) || d == _tailing);
+        if (loading != null)
+        {
+            Info(loading.Name + " is still loading. Merge once it has finished.");
+            return;
+        }
 
         var untimed = false;
         foreach (var d in parts)
@@ -286,10 +295,14 @@ internal sealed partial class MainForm : Form
 }
     }
 
+    /// <summary>The document a follow poll is reading new lines into, on its own thread;
+    /// null when none is. The next tick, merging and zone changes wait for it.</summary>
+    private LogDocument _tailing;
+
     private void TailPoll()
     {
         var f = F;
-        if (f == null || f.Merged || _indexing.ContainsKey(f))
+        if (_tailing != null || f == null || f.Merged || _indexing.ContainsKey(f))
         {
             return;
         }
@@ -311,14 +324,35 @@ internal sealed partial class MainForm : Form
                 f.N = 0; src.Lines = 0; src.IndexedTo = src.DataStart; src.LastUnterminated = false;
                 src.Offsets.Clear();
                 f.Marks.Clear();
+                _view.ForgetLines();
             }
             else if (src.LastUnterminated && f.N > 0) { f.N--; src.Lines--; }
-            _indexer.Run(f, 0, null, null);
-            _followEnd = true;
-            SyncTabs();
-            StartFilter();
         }
-        catch (Exception ex) { IgnoreNonCritical(ex, "Follow-file poll"); }
+        catch (Exception ex)
+        {
+            IgnoreNonCritical(ex, "Follow-file poll");
+            return;
+        }
+        // Read on a thread of its own, like the first load: a burst of output, or a
+        // rotated file read again from the start, froze the window while it was indexed.
+        _tailing = f;
+        var th = new Thread(delegate ()
+        {
+            try { _indexer.Run(f, 0, null, null); }
+            catch (Exception ex) { IgnoreNonCritical(ex, "Follow-file poll"); }
+            BeginInvokeSafe(() =>
+            {
+                _tailing = null;
+                SyncTabs();
+                if (ReferenceEquals(f, F))
+                {
+                    _followEnd = true;
+                    StartFilter();
+                }
+            });
+        });
+        th.IsBackground = true;
+        th.Start();
     }
 
 }

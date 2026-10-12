@@ -1,4 +1,7 @@
 using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
+using System.Text;
 using FlaUI.Core.WindowsAPI;
 using Logzilla.App.Infrastructure;
 using NUnit.Framework;
@@ -137,6 +140,109 @@ public sealed class SmokeTests
 
         app.WaitUntil(() => app.Text("HighlightInput").Length == 0, "the bar clears once the rule is added");
         app.Screenshot("added");
+    }
+
+    [Test]
+    public void ARegexThatDoesNotCompileIsReportedNotSearched()
+    {
+        // A half-typed "(" used to leave every entry showing under a red "no hits", as if
+        // the pattern had been searched for and matched it all.
+        using var app = LogzillaApp.Start(Plain);
+        app.WaitForResults();
+        var all = app.ResultCount;
+        app.Press("RegexChip");
+        app.WaitUntil(() => app.IsOn("RegexChip"), "regex is on");
+
+        app.SetText("SearchBox", "Slow (query");
+        app.WaitUntil(() => app.Find("HitCount").Name == "invalid regex", "the hit count says the pattern is invalid");
+        Assert.That(app.ResultCount, Is.EqualTo(all));
+        app.Screenshot("invalid");
+        // The status bar's message stops short of the counts on the right, with "…".
+        app.Resize(900, 600);
+        app.Screenshot("invalid-narrow");
+
+        app.SetText("SearchBox", "Slow (query)?");
+        app.WaitUntil(() => app.Find("HitCount").Name.EndsWith(" hits", System.StringComparison.Ordinal), "a valid pattern counts its hits");
+        Assert.That(app.ResultCount, Is.LessThan(all));
+    }
+
+    [Test]
+    public void TheCommandBarFitsANarrowWindow()
+    {
+        // Under ~1000px the right-hand group (Merge, Wrap, …) was drawn over "Filter to
+        // matches". Merge, also in the File menu, now steps aside until there is room.
+        using var app = LogzillaApp.Start(Plain, "gateway-access.log");
+        app.WaitForResults();
+
+        app.Resize(900, 650);
+        app.WaitUntil(() => app.Find("SearchMode").BoundingRectangle.Right <= app.Find("WrapChip").BoundingRectangle.Left,
+            "the search mode switch ends before the Wrap chip");
+        Assert.That(VisibleMerge(app), Is.Null, "Merge has stepped aside");
+        app.Screenshot("narrow");
+
+        app.Resize(1440, 880);
+        app.WaitUntil(() => VisibleMerge(app) is { } merge &&
+                            app.Find("SearchMode").BoundingRectangle.Right <= merge.BoundingRectangle.Left,
+            "Merge is back, clear of the search mode switch");
+        app.Screenshot("wide");
+    }
+
+    private static FlaUI.Core.AutomationElements.AutomationElement VisibleMerge(LogzillaApp app)
+    {
+        var merge = app.Window.FindFirstDescendant(cf => cf.ByAutomationId("MergeButton"));
+        return merge == null || merge.IsOffscreen ? null : merge;
+    }
+
+    [Test]
+    public void LiveTailPicksUpNewLinesAndARotatedFile()
+    {
+        // Following now reads on a thread of its own; it must still see the file grow,
+        // and start over when the file is truncated as a log rotation does.
+        var dir = Path.Combine(Path.GetTempPath(), "logzilla-e2e-tail-" + System.Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var path = Path.Combine(dir, "growing.log");
+        File.WriteAllText(path, Lines(0, 50));
+        try
+        {
+            using var app = LogzillaApp.Start(path);
+            app.WaitForResults();
+            Assert.That(app.ResultCount, Is.EqualTo(50));
+
+            app.Press("TailChip");
+            app.WaitUntil(() => app.IsOn("TailChip"), "live tail is on");
+
+            File.AppendAllText(path, Lines(50, 20_000));
+            app.WaitUntil(() => app.ResultCount == 20_050, "the appended lines are read");
+            app.Screenshot("grown");
+
+            File.WriteAllText(path, Lines(0, 10));
+            app.WaitUntil(() => app.ResultCount == 10, "the rotated file is read again from the top");
+            app.Screenshot("rotated");
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(dir, recursive: true);
+            }
+            catch (IOException ex)
+            {
+                TestContext.Out.WriteLine("Leaving " + dir + ": " + ex.Message);
+            }
+        }
+    }
+
+    private static string Lines(int from, int count)
+    {
+        var sb = new StringBuilder();
+        for (var i = from; i < from + count; i++)
+        {
+            sb.Append("2026-03-01 08:")
+              .Append((i / 60 % 60).ToString("00", CultureInfo.InvariantCulture)).Append(':')
+              .Append((i % 60).ToString("00", CultureInfo.InvariantCulture))
+              .Append(".000 INFO  request ").Append(i).Append(" served\n");
+        }
+        return sb.ToString();
     }
 
     [Test]
