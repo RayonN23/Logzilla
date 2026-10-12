@@ -225,7 +225,13 @@ internal sealed partial class MainForm
         tools.DropDownItems.Add(Mi("Load setup...", Keys.None, delegate { LoadSetup(); }));
         tools.DropDownItems.Add(Mi("Open settings folder", Keys.None, delegate
         {
-            try { System.Diagnostics.Process.Start(Paths.Dir); }
+            // Through Explorer: Process.Start on a bare folder path does not use the shell
+            // on .NET, so it tried to run the folder as a program and silently failed.
+            try
+            {
+                var explorer = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe");
+                System.Diagnostics.Process.Start(explorer, "\"" + Paths.Dir + "\"")?.Dispose();
+            }
             catch (Exception ex) { IgnoreNonCritical(ex, "Open settings folder"); }
         }));
 
@@ -315,7 +321,8 @@ internal sealed partial class MainForm
         _bMerge.Enabled = false; // nothing is open yet; SyncTabs turns it on
         cmdRight.Controls.Add(_bMerge);
 
-        cmdRight.Controls.Add(Divider());
+        _mergeDivider = Divider();
+        cmdRight.Controls.Add(_mergeDivider);
 
         _bWrap = new ToggleChip { Label = "Wrap", BackColor = Theme.BgChrome, Name = "WrapChip" };
         _bWrap.Height = Dpi.S(Theme.ControlHeight);
@@ -340,7 +347,7 @@ internal sealed partial class MainForm
         _bDate.Click2 += delegate { _view.ShowTime = !_view.ShowTime; _bDate.On = _view.ShowTime; _bDate.Invalidate(); _view.Invalidate(); };
         cmdRight.Controls.Add(_bDate);
 
-        _bTail = new ToggleChip { Label = "Live tail", Dot = Theme.Ok, BackColor = Theme.BgChrome };
+        _bTail = new ToggleChip { Label = "Live tail", Dot = Theme.Ok, BackColor = Theme.BgChrome, Name = "TailChip" };
         _bTail.Height = Dpi.S(Theme.ControlHeight);
         _bTail.Fit(90);
         _bTail.Margin = new Padding(0, 0, Dpi.S(Gap), 0);
@@ -591,14 +598,14 @@ internal sealed partial class MainForm
         _q.Leave += delegate { _searchFocused = false; _searchHost.Invalidate(); };
         _searchHost.Controls.Add(_q);
 
-        _hits = new Label();
+        _hits = new Label { Name = "HitCount" };
         _hits.AutoSize = false;
         _hits.TextAlign = ContentAlignment.MiddleRight;
         _hits.ForeColor = Theme.Text3; _hits.Font = Theme.MonoSmall;
         _hits.BackColor = Theme.BgData;
         _searchHost.Controls.Add(_hits);
 
-        _bRegex = new ToggleChip { Label = ".*", BorderlessOff = true, Font = Theme.MonoBody };
+        _bRegex = new ToggleChip { Label = ".*", BorderlessOff = true, Font = Theme.MonoBody, Name = "RegexChip" };
         _bRegex.BackColor = Theme.BgData;
         new ToolTip().SetToolTip(_bRegex, "Use regular expression");
         _bRegex.AccessibleName = "Use regular expression";
@@ -640,7 +647,9 @@ internal sealed partial class MainForm
         _bRegex.SetBounds(_bCase.Left - Dpi.S(2) - sq, top, sq, inner);
         _searchDividerX = _bRegex.Left - Dpi.S(6);
 
-        var hitsW = Dpi.Text("9,999 of 9,999", Theme.MonoSmall).Width;
+        // Plus the label's own padding: measured to the pixel, a count as long as the
+        // sample ("1,234,567 hits") wrapped its last word onto a line nobody could see.
+        var hitsW = Dpi.Text("9,999 of 9,999", Theme.MonoSmall).Width + Dpi.S(8);
         _hits.SetBounds(_searchDividerX - Dpi.S(8) - hitsW, top, hitsW, inner);
         _bClear.SetBounds(_hits.Left - Dpi.S(2) - Dpi.S(22), (h - Dpi.S(22)) / 2, Dpi.S(22), Dpi.S(22));
 
@@ -650,6 +659,9 @@ internal sealed partial class MainForm
         _q.Width = Math.Max(20, _bClear.Left - Dpi.S(4) - textLeft);
         _searchHost.Invalidate();
     }
+
+    private Panel _mergeDivider;
+    private bool _mergeFolded;
 
     /// <summary>Gives the search field whatever width the command bar has spare,
     /// between the brief's 560px and a usable minimum.</summary>
@@ -664,12 +676,64 @@ internal sealed partial class MainForm
             }
         }
         used += _searchHost.Margin.Horizontal;
-        var avail = cmdBar.ClientSize.Width - cmdRight.Width - used - Dpi.S(GroupGap);
+
+        // Too narrow for both groups (a window under ~1000px wide), the right-hand group
+        // was drawn over the search mode switch. Merge steps aside first: it is also
+        // File › Merge and Ctrl+M.
+        // Our own flag, not Visible: that reads false for every control until the window
+        // itself is shown.
+        var mergeW = _bMerge.Width + _bMerge.Margin.Horizontal + _mergeDivider.Width + _mergeDivider.Margin.Horizontal;
+        var rightFull = cmdRight.Width + (_mergeFolded ? mergeW : 0);
+        var fold = cmdBar.ClientSize.Width - rightFull - used - Dpi.S(GroupGap) < Dpi.S(SearchMinWidth);
+        if (fold != _mergeFolded)
+        {
+            _mergeFolded = fold;
+            _bMerge.Visible = !fold;
+            _mergeDivider.Visible = !fold;
+        }
+        var avail = cmdBar.ClientSize.Width - (fold ? rightFull - mergeW : rightFull) - used - Dpi.S(GroupGap);
         var w = Math.Clamp(avail, Dpi.S(SearchMinWidth), Dpi.S(SearchMaxWidth));
         if (w != _searchHost.Width)
         {
             _searchHost.Width = w;
             PositionSearchHost();
+        }
+
+        // Whatever still does not fit would sit under the right-hand group, a sliver of
+        // it showing at the edge. It is left out instead, and back once there is room.
+        var limit = cmdBar.ClientSize.Width - (fold ? rightFull - mergeW : rightFull);
+        // Worked out from sizes alone: Visible reads false for everything until the
+        // window is shown, so it cannot say what was showing before.
+        var x = cmdLeft.Padding.Left;
+        var fits = 0;
+        while (fits < cmdLeft.Controls.Count)
+        {
+            var c = cmdLeft.Controls[fits];
+            x += c.Margin.Left + c.Width;
+            if (x > limit && c != _searchHost)
+            {
+                break;
+            }
+            x += c.Margin.Right;
+            fits++;
+        }
+        // Whole groups only — not "Context −" without its "0 +" — and no divider left
+        // with nothing after it: the cut goes back to the divider before the group.
+        if (fits < cmdLeft.Controls.Count)
+        {
+            var d = fits - 1;
+            while (d > 0 && cmdLeft.Controls[d].GetType() != typeof(Panel))
+            {
+                d--;
+            }
+            if (d > 0)
+            {
+                fits = d;
+            }
+        }
+        for (var k = 0; k < cmdLeft.Controls.Count; k++)
+        {
+            cmdLeft.Controls[k].Visible = k < fits;
         }
     }
 
@@ -918,6 +982,20 @@ internal sealed partial class MainForm
         _statusHost.Controls.Add(left);
         _statusHost.Controls.Add(right);
         _statusHost.Controls.Add(new Panel { Dock = DockStyle.Top, Height = 1, BackColor = Theme.Line });
+
+        // The left run spans the whole bar, under the right-hand one, so a long message
+        // ("Search stopped: the regular expression took too long…") ran on beneath the
+        // counts and lost its end. It now stops short of them, with "…" and the whole
+        // text as a tooltip.
+        _st3.AutoEllipsis = true;
+        void FitMessage()
+        {
+            var room = right.Left - _st3.Left - _st3.Margin.Right - Dpi.S(8);
+            _st3.MaximumSize = new Size(Math.Max(Dpi.S(40), room), _st3.Font.Height + Dpi.S(2));
+        }
+        right.LocationChanged += delegate { FitMessage(); };
+        right.SizeChanged += delegate { FitMessage(); };
+        _st3.LocationChanged += delegate { FitMessage(); };
     }
 
     private void ApplySettings()

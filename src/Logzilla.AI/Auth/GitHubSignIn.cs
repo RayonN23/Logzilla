@@ -61,10 +61,16 @@ public sealed class GitHubSignIn
             ["scope"] = scope ?? "",
         }, cancellationToken).ConfigureAwait(false);
         ThrowIfError(json);
+        // The address is handed to the shell to open, so only a web page will do: a
+        // file path or another scheme here would run whatever it names.
+        if (!Uri.TryCreate(Text(json, "verification_uri"), UriKind.Absolute, out var verify) || verify.Scheme != Uri.UriSchemeHttps)
+        {
+            throw new GitHubSignInException("GitHub sent an unexpected sign-in address.");
+        }
         return new DeviceCode(
             Text(json, "device_code"),
             Text(json, "user_code"),
-            new Uri(Text(json, "verification_uri")),
+            verify,
             TimeSpan.FromSeconds(Number(json, "expires_in", 900)),
             TimeSpan.FromSeconds(Math.Max(1, Number(json, "interval", 5))));
     }

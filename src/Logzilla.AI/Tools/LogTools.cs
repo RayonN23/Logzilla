@@ -146,7 +146,7 @@ public sealed class LogTools
             {
                 return problem;
             }
-            var r = Scoped(_ctx.Engine.Run(doc, spec, null, null));
+            var r = Scoped(Scan(doc, spec));
             var hits = string.IsNullOrEmpty(query) ? Headers(doc, r, false) : Matches(doc, r);
             limit = Math.Clamp(limit, 1, 100);
             var sb = new StringBuilder();
@@ -220,7 +220,7 @@ public sealed class LogTools
             {
                 return problem;
             }
-            var r = Scoped(_ctx.Engine.Run(doc, spec, null, null));
+            var r = Scoped(Scan(doc, spec));
             var hits = Headers(doc, r, true);
             if (hits.Count == 0)
             {
@@ -278,7 +278,7 @@ public sealed class LogTools
             {
                 return problem;
             }
-            var r = Scoped(_ctx.Engine.Run(doc, spec, null, null));
+            var r = Scoped(Scan(doc, spec));
             var hits = Headers(doc, r, false);
             if (hits.Count == 0)
             {
@@ -391,6 +391,8 @@ public sealed class LogTools
         {
             text = tool + " failed: " + ex.Message;
         }
+        // What a tool cuts short it has already redacted (AppendLines, AppendEntry), so
+        // the cut below can only ever split a placeholder, never a real value.
         text = _redactor.Redact(text ?? "");
         text = text.Length > MaxOutputChars ? text[..MaxOutputChars] + "\n… (cut off; narrow the request)" : text;
         Sending?.Invoke(tool, text);
@@ -416,8 +418,25 @@ public sealed class LogTools
     {
         return _ctx.ScopeToView && _ctx.View != null
             ? _ctx.View
-            : _ctx.Engine.Run(_ctx.Document, QuerySpec.Build("", false, false, 0x7F, -1, double.NaN, double.NaN, 0, true, true), null, null);
+            : Scan(_ctx.Document, QuerySpec.Build("", false, false, 0x7F, -1, double.NaN, double.NaN, 0, true, true));
     }
+
+    /// <summary>
+    /// Runs the engine with a time limit. The model chooses the query, and a log can steer
+    /// the model: a regex that is slow on every line, while staying under the per-entry
+    /// timeout, would otherwise keep a core busy for hours with nothing able to stop it.
+    /// </summary>
+    private FilterResult Scan(LogDocument doc, QuerySpec spec)
+    {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        return _ctx.Engine.Run(doc, spec, () => clock.Elapsed >= ScanBudget, null)
+               ?? throw new InvalidOperationException(
+                   "The search was stopped after " + ScanBudget.TotalSeconds.ToString(CultureInfo.InvariantCulture) +
+                   " seconds. Narrow it: a plainer pattern, a level or a time range.");
+    }
+
+    /// <summary>Longest one tool call may spend scanning the log.</summary>
+    internal TimeSpan ScanBudget { get; set; } = TimeSpan.FromSeconds(60);
 
     /// <summary>With the scope set to the user's view, drops whatever their filters hide.</summary>
     private FilterResult Scoped(FilterResult r)
@@ -556,7 +575,7 @@ public sealed class LogTools
             {
                 break;
             }
-            var text = OneLine(Message(doc, reader, i));
+            var text = OneLine(_redactor.Redact(Message(doc, reader, i)));
             var extra = NextHeader(doc, i) - i - 1;
             sb.Append(Label(doc, i)).Append(' ').Append(text);
             if (extra > 0)
@@ -583,7 +602,10 @@ public sealed class LogTools
                 text.Append('\n').Append(reader.Text(i));
             }
         }
-        var s = text.Length > MaxEntryChars ? text.ToString(0, MaxEntryChars) + " …" : text.ToString();
+        // Redacted before it is cut: a token or address cut in half no longer looks like
+        // one, and the half before the cut would go out as it is.
+        var whole = _redactor.Redact(text.ToString());
+        var s = whole.Length > MaxEntryChars ? whole[..MaxEntryChars] + " …" : whole;
         sb.Append(Label(doc, header)).Append(' ').Append(s).AppendLine();
     }
 

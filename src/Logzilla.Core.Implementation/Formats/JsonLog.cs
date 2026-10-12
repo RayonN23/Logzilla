@@ -72,9 +72,51 @@ internal static class JsonLog
         return false;
     }
 
-    public static byte Level(string v)
+    public static byte Level(string v) => v == null ? (byte)0 : Level(v.AsSpan());
+
+    /// <summary>
+    /// The level of the value at <paramref name="p"/>: what <c>Level(Scalar(b, p, end, max))</c>
+    /// gives, read into a stack buffer instead. The indexer asks this of every line of a
+    /// JSON log, and building a string each time was the one allocation per line left.
+    /// </summary>
+    public static byte LevelAt(byte[] b, int p, int end, int max)
     {
-        if (string.IsNullOrEmpty(v))
+        ArgumentNullException.ThrowIfNull(b);
+        Span<char> buf = stackalloc char[Math.Clamp(max, 1, 64)];
+        var n = 0;
+        while (p < end && (b[p] == (byte)' ' || b[p] == (byte)'\t'))
+        {
+            p++;
+        }
+        if (p >= end)
+        {
+            return 0;
+        }
+        if (b[p] == (byte)'"')
+        {
+            p++;
+            while (p < end && b[p] != (byte)'"' && n < buf.Length)
+            {
+                if (b[p] == (byte)'\\' && p + 1 < end)
+                {
+                    p++;
+                }
+                buf[n++] = (char)b[p]; p++;
+            }
+        }
+        else
+        {
+            while (p < end && b[p] != (byte)',' && b[p] != (byte)'}' && n < buf.Length)
+            {
+                buf[n++] = (char)b[p]; p++;
+            }
+        }
+        return Level(buf[..n].Trim());
+    }
+
+    public static byte Level(ReadOnlySpan<char> v)
+    {
+        if (v.IsEmpty)
         {
             return 0;
         }

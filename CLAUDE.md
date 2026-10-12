@@ -292,7 +292,7 @@ AI infrastructure in `Infrastructure/`: `AIPolicy` (registry policy under `SOFTW
 
 **Generation counter pattern:** `_liveGen` (volatile int) is incremented each time a new filter starts. The background thread checks `_liveGen != gen` to self-cancel without locks.
 
-**Tail mode:** `_tailTimer` fires every second, calls the indexer to pick up new bytes, then re-runs the filter.
+**Tail mode:** `_tailTimer` fires every second; when the file has changed, `TailPoll` runs the indexer on a background thread (`_tailing` holds the document meanwhile, and merge / zone changes wait for it), then re-runs the filter. A truncated file is re-read from the top and `LogView.ForgetLines()` drops per-line caches.
 
 ---
 
@@ -320,6 +320,6 @@ Standalone installer / uninstaller console app. Key types:
 
 5. **`Skip` byte** — chars of the timestamp+level prefix suppressed in the message column. Lets the grid show clean message text without re-parsing every rendered row.
 
-6. **`_liveGen` cancellation** — the filter runs on a `Thread` (not `Task`), checked every 65536 lines. A new query increments `_liveGen`, causing the old thread to return early.
+6. **`_liveGen` cancellation** — the filter runs on a `Thread` (not `Task`), checked every 65536 lines (every 4096 when a regex or field filter decodes each line). A new query increments `_liveGen`, causing the old thread to return early.
 
 7. **`LogDocument.Ensure(n)`** — grows with `cap = cap + cap/2 + 1024` (1.5× + slack). Never shrinks. Keep in mind when handling large files that arrays are pre-allocated at 64 K entries and may be several MB.
