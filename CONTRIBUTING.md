@@ -3,8 +3,8 @@
 ## Getting set up
 
 ```powershell
-git clone https://github.com/rayonnarain/logzilla
-cd logzilla
+git clone https://github.com/RayonN23/Logzilla
+cd Logzilla
 dotnet build Logzilla.sln
 dotnet test  Logzilla.sln
 ```
