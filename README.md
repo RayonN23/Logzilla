@@ -6,7 +6,7 @@
 
 **A log analyzer for very large files.**
 
-[![CI](https://github.com/rayonnarain/logzilla/actions/workflows/ci.yml/badge.svg)](https://github.com/rayonnarain/logzilla/actions/workflows/ci.yml)
+[![CI](https://github.com/RayonN23/Logzilla/actions/workflows/ci.yml/badge.svg)](https://github.com/RayonN23/Logzilla/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 </div>
@@ -26,7 +26,7 @@ customer device IDs, hostnames and internal addresses.
 ## Install
 
 Download `Logzilla-Setup.exe` from
-[Releases]([https://github.com/upstream/logzilla/releases](https://github.com/RayonN23/Logzilla/tree/Upstream/releases)) and run it.
+[Releases](https://github.com/RayonN23/Logzilla/releases/latest) and run it.
 
 Nothing else is needed. The installer carries the application inside it, the
 application bundles its own .NET runtime, and everything is written under your
@@ -337,8 +337,8 @@ Visual Studio 2022 / Rider). **There is no other tooling to install** — the
 installer is a project in this solution rather than a separate product.
 
 ```powershell
-git clone https://github.com/rayonnarain/logzilla
-cd logzilla
+git clone https://github.com/RayonN23/Logzilla
+cd Logzilla
 
 dotnet build Logzilla.sln -c Release   # build
 dotnet test  Logzilla.sln              # run the unit tests
