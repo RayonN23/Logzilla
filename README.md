@@ -26,7 +26,7 @@ customer device IDs, hostnames and internal addresses.
 ## Install
 
 Download `Logzilla-Setup.exe` from
-[Releases](https://github.com/rayonnarain/logzilla/releases) and run it.
+[Releases](https://github.com/upstream/logzilla/releases) and run it.
 
 Nothing else is needed. The installer carries the application inside it, the
 application bundles its own .NET runtime, and everything is written under your
