@@ -904,6 +904,20 @@ internal sealed partial class LogView : Control
     /// </summary>
     public string ReadableTextOf(int line) => Readable(line, true);
 
+    /// <summary>What Copy puts on the clipboard for a line: the readable message led
+    /// by the time (in the clock the column reads in) and level the row shows beside
+    /// it. A continuation line has no stamp of its own, so it goes over bare; Raw
+    /// copies the line as it is in the file, which already carries both.</summary>
+    public string CopyTextOf(int line)
+    {
+        var text = ReadableTextOf(line);
+        if (Raw || _file == null || line < 0 || line >= _file.N || _file.Flag[line] != 0)
+        {
+            return text;
+        }
+        return EntryClip.Entry(TimeText(ShownTime(line)), Levels.Name[_file.Sev[line]], text);
+    }
+
     /// <summary>The summary form a one-line grid row can hold: the same message, but
     /// with only the head of any exception.</summary>
     private string GridTextOf(int line) => Readable(line, false);

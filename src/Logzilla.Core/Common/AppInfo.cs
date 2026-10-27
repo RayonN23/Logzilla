@@ -6,5 +6,5 @@ public static class AppInfo
     /// "Logzilla Log Viewer" is the installed display name (see AppMetadata).</summary>
     public const string Name = "Logzilla";
     public const string Author = "Rayon Narain";
-    public const string Version = "3.1.1";
+    public const string Version = "3.2.0";
 }

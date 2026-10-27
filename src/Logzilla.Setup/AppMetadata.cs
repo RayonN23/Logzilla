@@ -7,7 +7,7 @@ public static class AppMetadata
     public const string ExecutableName = "Logzilla.exe";
     public const string SetupCopyName = "Logzilla-Setup.exe";
     public const string Publisher = "Rayon Narain (Independent)";
-    public const string Version = "3.1.1";
+    public const string Version = "3.2.0";
     public const string Description = "A log analyzer for very large files";
 
     /// <summary>Shown in Add/Remove Programs so a user knows who to contact.</summary>

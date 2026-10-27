@@ -1,5 +1,13 @@
 # What's new in Logzilla
 
+## 3.2.0
+
+### New
+- **File › Export shown entries as plain text** turns a JSON log (CLEF, Bunyan, pino, ECS) into an ordinary text log: one `time LEVEL message` line per record, with any stack trace on the lines below it. Times are written in the clock the time column shows. Fields other than the time, level, message and exception are left out
+
+### Fixed
+- **Copied entries had no time.** Ctrl+C copied only the message, without the time and level the grid shows in their own columns, so a run of JSON entries pasted elsewhere could not be put in order. Each copied entry now starts with its time and level
+
 ## 3.1.1
 
 ### Security

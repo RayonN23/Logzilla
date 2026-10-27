@@ -86,6 +86,24 @@ public sealed class EntryClipTests
         Assert.That(copied, Does.StartWith("[api] boom" + Nl + "   at X()" + Nl));
     }
 
+    // ── time and level ─────────────────────────────────────────────────
+
+    [Test]
+    public void AnEntryLeadsWithItsTimeAndLevel()
+    {
+        Assert.That(EntryClip.Entry("2026-10-26 09:14:03.120", "ERROR", "connection reset by peer"),
+            Is.EqualTo("2026-10-26 09:14:03.120 ERROR connection reset by peer"));
+    }
+
+    [Test]
+    public void AMissingTimeOrLevelLeavesNoGap()
+    {
+        Assert.That(EntryClip.Entry("", "WARN", "disk low"), Is.EqualTo("WARN disk low"));
+        Assert.That(EntryClip.Entry("2026-10-26 09:14:03.120", "", "disk low"), Is.EqualTo("2026-10-26 09:14:03.120 disk low"));
+        Assert.That(EntryClip.Entry(null, null, "   at Foo.Bar()"), Is.EqualTo("   at Foo.Bar()"));
+        Assert.That(EntryClip.Entry(null, null, null), Is.EqualTo(""));
+    }
+
     // ── nothing to copy ────────────────────────────────────────────────
 
     [Test]

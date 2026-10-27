@@ -163,6 +163,7 @@ internal sealed partial class MainForm
         file.DropDownItems.Add(new ToolStripSeparator());
         file.DropDownItems.Add(Mi("Merge open files into one timeline", Keys.Control | Keys.M, delegate { DoMerge(); }));
         file.DropDownItems.Add(Mi("Export shown entries...", Keys.Control | Keys.E, delegate { DoExport(); }));
+        file.DropDownItems.Add(Mi("Export shown entries as plain text...", Keys.None, delegate { DoExportPlain(); }));
         file.DropDownItems.Add(new ToolStripSeparator());
         file.DropDownItems.Add(Mi("Close tab", Keys.Control | Keys.W, delegate { DoClose(_active); }));
         file.DropDownItems.Add(Mi("Close all tabs", Keys.None, delegate { while (_docs.Count > 0)
