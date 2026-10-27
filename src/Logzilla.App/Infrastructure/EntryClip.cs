@@ -42,6 +42,27 @@ internal static class EntryClip
         return sb.ToString();
     }
 
+    /// <summary>
+    /// One entry as the grid row reads it: the time and level the grid gives in
+    /// their own columns, then the message. The message alone has neither — a JSON
+    /// record's are fields, a plain-text line's are skipped off the front — so
+    /// without this a pasted run of entries has no times at all. An empty time
+    /// (none known, or a continuation line) or level (none detected) is left out.
+    /// </summary>
+    public static string Entry(string time, string level, string message)
+    {
+        var sb = new StringBuilder();
+        if (!string.IsNullOrEmpty(time))
+        {
+            sb.Append(time).Append(' ');
+        }
+        if (!string.IsNullOrEmpty(level))
+        {
+            sb.Append(level).Append(' ');
+        }
+        return sb.Length == 0 ? message ?? "" : sb.Append(message).ToString();
+    }
+
     /// <summary>A rendered entry carries its exception's own line breaks; the
     /// clipboard wants them in the platform's spelling.</summary>
     private static string Normalize(string text)

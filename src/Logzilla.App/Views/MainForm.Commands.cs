@@ -283,6 +283,64 @@ internal sealed partial class MainForm
         }
     }
 
+    /// <summary>
+    /// Writes the shown entries of a JSON log as a plain-text log: one
+    /// "time LEVEL message" line per record, in the clock the time column reads in,
+    /// with an exception's stack trace on the lines under it. Lines from a plain-text
+    /// source in a merged view go over as they are. Fields other than the time,
+    /// level, message and exception do not survive — that is the point of the format.
+    /// </summary>
+    private void DoExportPlain()
+    {
+        var f = F;
+        if (f == null || _res == null || _res.View.Count == 0) { Info("Nothing to export."); return; }
+        if (!f.Srcs.Exists(s => s.IsJson)) { Info("This log is already plain text; use Export shown entries instead."); return; }
+        using (var d = new SaveFileDialog())
+        {
+            d.Filter = "Log file|*.log|Text file|*.txt|All files|*.*";
+            d.FileName = Path.GetFileNameWithoutExtension(f.Name) + "-plain.log";
+            if (d.ShowDialog(this) != DialogResult.OK)
+            {
+                return;
+            }
+            var old = Cursor.Current;
+            Cursor.Current = Cursors.WaitCursor;
+            try
+            {
+                using (var outp = new StreamWriter(d.FileName, false, new UTF8Encoding(false), 1 << 16))
+                using (var feed = _indexer.OpenReader(f, ExportReadBuffer))
+                {
+                    outp.NewLine = "\r\n";
+                    var tag = f.Merged;
+                    for (var k = 0; k < _res.View.Count; k++)
+                    {
+                        var i = _res.View[k];
+                        var text = feed.Text(i);
+                        if (f.SrcOf(i).IsJson)
+                        {
+                            text = _jsonReader.RenderFull(text);
+                            if (f.Flag[i] == 0)
+                            {
+                                text = EntryClip.Entry(ShowLineTime(f, i), Levels.Name[f.Sev[i]], text);
+                            }
+                            text = text.Replace("\r\n", "\n").Replace("\n", "\r\n");
+                        }
+                        if (tag)
+                        {
+                            outp.Write('[');
+                            outp.Write(f.Srcs[f.Src[i]].Label);
+                            outp.Write("] ");
+                        }
+                        outp.WriteLine(text);
+                    }
+                }
+                _st3.Text = "Exported " + DisplayFormatter.Number(_res.View.Count) + " entries as plain text";
+            }
+            catch (Exception ex) { Info("Export failed:\r\n" + ex.Message); }
+            finally { Cursor.Current = old; }
+        }
+    }
+
     private void SaveSetup()
     {
         using (var d = new SaveFileDialog())
@@ -652,9 +710,10 @@ internal sealed partial class MainForm
     /// Ctrl+C. Copies every selected entry, which is one of them unless the user
     /// shift-clicked or shift-arrowed a run.
     ///
-    /// The readable message (JSON rendered to its summary line, or the plain-text
-    /// line with its timestamp/level prefix stripped) — not the raw record, which
-    /// for a JSON log is an unreadable blob once pasted elsewhere.
+    /// The entry as its row reads: the shown time and level, then the readable
+    /// message (JSON rendered to its summary line, or the plain-text line after its
+    /// own prefix) — not the raw record, which for a JSON log is an unreadable blob
+    /// once pasted elsewhere.
     /// </summary>
     private void CopySelected()
     {
@@ -726,7 +785,7 @@ internal sealed partial class MainForm
         for (var k = 0; k < take; k++)
         {
             var i = lines[k];
-            texts.Add(raw ? _view.TextOf(i) : _view.ReadableTextOf(i));
+            texts.Add(raw ? _view.TextOf(i) : _view.CopyTextOf(i));
             labels?.Add(f.Srcs[f.Src[i]].Label);
         }
         try
