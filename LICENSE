@@ -1,0 +1,102 @@
+LOGZILLA LOG VIEWER
+END USER LICENCE AGREEMENT
+
+Copyright (c) 2026 Rayon Narain. All rights reserved.
+
+This agreement is between you and Rayon Narain ("the Author"). It applies to
+Logzilla Log Viewer versions released after 3.2.0, including the installer, the
+application and its documentation ("the Software"). By installing or using the
+Software you accept this agreement. If you do not accept it, do not install or
+use the Software.
+
+If you accept this agreement on behalf of an organisation, you confirm that you
+have authority to bind it, and "you" includes that organisation.
+
+1. LICENCE
+
+   The Software is licensed, not sold. The Author grants you a personal,
+   non-exclusive, non-transferable, revocable licence to install and use the
+   Software free of charge, on any number of devices, for personal, internal
+   business or other lawful purposes.
+
+2. RESTRICTIONS
+
+   You may not, and may not allow anyone else to:
+
+   a. sell, rent, lease, sublicense or charge for the Software;
+   b. publish or redistribute the Software, or make it available for others to
+      download, except that an organisation may deploy unmodified copies to its
+      own staff and contractors for its internal use;
+   c. modify the Software or create derivative works from it;
+   d. reverse engineer, decompile or disassemble the Software, or attempt to
+      obtain its source code, except where applicable law permits this despite
+      this restriction; or
+   e. remove or alter any copyright, trademark or other notice in the Software.
+
+3. OWNERSHIP
+
+   The Author and the Author's licensors own the Software and all intellectual
+   property rights in it. The Author reserves all rights not expressly granted
+   in this agreement.
+
+   The Author may freely use any feedback, suggestions or bug reports you
+   provide, without obligation to you.
+
+4. THIRD-PARTY COMPONENTS
+
+   The Software includes third-party components licensed under their own terms,
+   listed in THIRD-PARTY-NOTICES.txt. Nothing in this agreement limits your
+   rights under those terms in those components.
+
+5. YOUR DATA AND THIRD-PARTY AI SERVICES
+
+   The Software processes log files on your own device. The optional AI
+   assistant is off by default. If you turn it on and ask a question, excerpts
+   of your logs and your question are sent to the AI provider you selected.
+
+   Hiding personal data before sending is automated and may miss some data. You
+   are responsible for checking that your use of the assistant is permitted for
+   your data and by your organisation, and for your own accounts, API keys and
+   charges with those providers. Your use of a provider is governed by that
+   provider's own terms. The Author does not operate those services and is not
+   responsible for them.
+
+6. NO WARRANTY
+
+   THE SOFTWARE IS PROVIDED "AS IS" AND "AS AVAILABLE", WITHOUT WARRANTY OF ANY
+   KIND, EXPRESS OR IMPLIED, INCLUDING THE WARRANTIES OF MERCHANTABILITY, FITNESS
+   FOR A PARTICULAR PURPOSE, TITLE AND NON-INFRINGEMENT. THE AUTHOR DOES NOT
+   WARRANT THAT THE SOFTWARE WILL BE UNINTERRUPTED OR ERROR-FREE, OR THAT ITS
+   ANALYSIS, INCLUDING ANY AI-GENERATED ANSWER, WILL BE ACCURATE OR COMPLETE.
+
+7. LIMITATION OF LIABILITY
+
+   TO THE MAXIMUM EXTENT PERMITTED BY LAW, THE AUTHOR WILL NOT BE LIABLE FOR ANY
+   INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL OR PUNITIVE DAMAGES, OR FOR ANY
+   LOSS OF DATA, PROFITS, REVENUE OR BUSINESS, ARISING FROM OR IN CONNECTION WITH
+   THE SOFTWARE OR THIS AGREEMENT, HOWEVER CAUSED AND EVEN IF ADVISED OF THE
+   POSSIBILITY OF SUCH DAMAGES. THE AUTHOR'S TOTAL LIABILITY WILL NOT EXCEED THE
+   AMOUNT YOU PAID FOR THE SOFTWARE.
+
+   Nothing in this agreement excludes or limits any liability or consumer right
+   that cannot be excluded or limited under applicable law.
+
+8. TERMINATION
+
+   This licence ends automatically if you breach this agreement. The Author may
+   also end it by notice to you. When it ends you must stop using the Software
+   and delete all copies. Sections 3, 6, 7 and 9 continue after it ends.
+
+9. GENERAL
+
+   You must comply with all export control and sanctions laws that apply to your
+   use of the Software. If a court finds any part of this agreement unenforceable,
+   the rest continues in effect. This agreement is the entire agreement between
+   you and the Author about the Software. The Author may offer later versions
+   under different terms.
+
+10. EARLIER VERSIONS
+
+   Versions 3.2.0 and earlier were released under the MIT License. Copies of
+   those versions remain under that licence. This agreement does not apply to
+   them, and the MIT License does not apply to any later version.
